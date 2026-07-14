@@ -86,34 +86,53 @@ OpenClaw runtime 按你已配的 IM 通道
 - **不需要 opphub skill 装 cron 查撮合**(plugin 已经替代)
 - **不需要 opphub skill 推 IM**(plugin 推的)
 
-### skill 自带的 cron 任务(只有一个)
+### skill 自带的 cron 任务(只有一个, 但分场景)
 
 | 任务名 | 干啥 | 频率 | 通道 |
 |---|---|---|---|
 | `opphub-skill-daily-check` | 检查 skill 自身是否有新版本 | 每天 09:00(可配)| OpenClaw announce last |
 
-**仅此一个**。PRD 立场 4 破例条款:skill 允许自身运维 cron,**不允许业务 cron**。
+**仅此一个**。PRD 立场 4 破例条款:skill 允许自身运维 cron,**不允许业务 cron**(捰合推送靠 plugin)。
+
+**按 plugin 状态理解 cron**:
+
+- 🟢 **plugin 已装** → cron 是保底(检查 skill 版本, 不查捰合)。plugin 双查机制 (v0.6.0 起) 走通道推卡片
+- 🟡 **plugin 未装** → cron 是唯一推送源 (但只查 skill 版本, 不查捰合, 不会让你错过捰合)
+
+⚠️ **不管 plugin 装不装, skill cron 都不查捰合**。 未装 plugin 时捰合推送按 plugin 缺失处理 (去装 plugin, 不是补 cron)。
 
 ---
 
-## ⭐ 进阶(可选)· 装 plugin 享秒收
+## ⭐ 推送状态(自动检查 plugin)
 
-skill **不带**实时撮合推送。**想秒收**(服务器撮合触发 → 秒级到达你的飞书),装 openclaw plugin:
+bot 调 `偶合状态` 会自动检查 plugin 装没装, 走两路引导:
+
+### 🟢 plugin 已装(比如 v0.5.32)
 
 ```
-openclaw plugins install clawhub:@mtty-ai/opphub
+推送走 server WS 实时 → plugin 收 → IM
+不需要 cron 兜底
+
+· 可选 cron 任务(只查 skill 版本, 不查撮合)
+  opphub-skill-daily-check  · 每天 09:00
+
+· plugin 更新检查 (v0.6.0 起)
+  plugin 启动时自动双查 skill + plugin 两个版本
 ```
 
-装好 plugin **不需要重新登录** — 它会自动读你已经在 skill 里登好的账号(token 在 Keychain 里是同一份)。
+### 🟡 plugin 未装
 
-plugin 装好后:
+```
+推送走 skill 自带 cron(每天查一次 skill 版本, 不查撮合)
+想秒收捰合(可选), 装 openclaw plugin:
 
-| 状态 | 含义 |
-|---|---|
-| 🟡 未装 | 只能 cron 每天查一次(运维 cron,不查撮合)|
-| 🟢 已装 | server WS 实时推送 → plugin 收 → 转 IM → 秒级到手机 |
+  openclaw plugins install clawhub:@mtty-ai/opphub
 
-> ⚠️ **bot 不能帮你点 OAuth 同意**(plugin 装命令要你自己敲,OAuth 同意要你自己点)。
+装好 plugin 不需要重新登录 — 它会自动读你已经在 skill 里登好的账号
+(token 在 Keychain 里是同一份)
+```
+
+> ⚠️ **bot 不能帮你点 OAuth 同意**(plugin 装命令要你自己敲, OAuth 同意要你自己点)。
 
 ---
 

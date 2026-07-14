@@ -82,6 +82,21 @@ OpenClaw runtime → 按 user 已配 IM channel
 - announce last 通道推结果
 - **不查撮合**(plugin 替代)
 
+### plugin 检测(alpha.4 加, 老板 10:38 拍)
+
+`bin/opphub status` 加了 `plugin_check` 字段, bot 不用自己 `openclaw plugins list`:
+
+- 检测路径: `~/.openclaw/extensions/opphub/package.json` (优先) / `~/.openclaw/plugins/opphub/package.json` (fallback)
+- 读 `package.json` 的 `version` 字段
+- 返回 `{ installed: bool, version: string|null, path: string|null, hint: string }`
+
+**SKILL.md `⭐ 推送状态` 段分两路引导** (alpha.4):
+
+- 🟢 plugin 已装 → bot 不念装命令, 只说"推送走 server WS"
+- 🟡 plugin 未装 → bot 念装命令 (openclaw plugins install clawhub:@mtty-ai/opphub)
+
+bot 读 `plugin_check.installed` 决定推哪个。
+
 ### 更新检查(双轨, 不冲突 · 老板 2026-07-14 10:07 拍)
 
 | 检查器 | 谁负责 | 范围 | 通道 |

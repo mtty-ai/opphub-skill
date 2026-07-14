@@ -288,9 +288,35 @@ async function main() {
     return payload?.opcId ?? payload?.sub ?? null;
   }
 
+  // alpha.4: 检测 plugin 是否装 + 拿版本号 (文件存在性查)
+  // OpenClaw plugin 装在 ~/.openclaw/extensions/opphub/dist/index.js (老板本机现状)
+  // 读 package.json 的 version
+  function checkPluginInstalled() {
+    const candidates = [
+      join(homedir(), ".openclaw", "extensions", "opphub", "package.json"),
+      join(homedir(), ".openclaw", "plugins", "opphub", "package.json"),
+    ];
+    for (const pkg of candidates) {
+      if (existsSync(pkg)) {
+        try {
+          const json = JSON.parse(readFileSync(pkg, "utf8"));
+          return {
+            installed: true,
+            version: json.version ?? null,
+            path: pkg.replace("/package.json", ""),
+          };
+        } catch {
+          return { installed: true, version: null, path: pkg.replace("/package.json", "") };
+        }
+      }
+    }
+    return { installed: false, version: null, path: null };
+  }
+
   if (cmd === "status") {
     const t = await readToken();
     const s = tokenStatus(t);
+    const plugin = checkPluginInstalled();
     out({
       ok: true,
       status: s,
@@ -299,6 +325,15 @@ async function main() {
       storage: process.platform === "darwin"
         ? `macOS Keychain (service=${KEYCHAIN_SERVICE}, account=${KEYCHAIN_ACCOUNT})`
         : `AES-256-GCM (${TOKEN_FILE})`,
+      // alpha.4 新加: plugin 检测
+      plugin_check: {
+        installed: plugin.installed,
+        version: plugin.version,
+        path: plugin.path,
+        hint: plugin.installed
+          ? `plugin v${plugin.version} 已装 · 推送走 server WS 秒级`
+          : "plugin 未装 · 推送走 skill 自带 cron(每天 09:00 检查 skill 版本, 不查撮合)",
+      },
     });
     return;
   }
