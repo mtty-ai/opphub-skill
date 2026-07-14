@@ -211,7 +211,12 @@ async function deviceFlowLogin() {
     });
     const data = await tokenResp.json().catch(() => ({}));
     if (tokenResp.ok && data.access_token) {
-      const opcId = (await fetchUserinfo(data.access_token)) ?? data.opc_id ?? "";
+      // alpha.3: 优先从 JWT 解 opcId (与 plugin 同构), fallback 才调 userinfo
+      const jwtPayload = decodeJwtPayload(data.access_token);
+      let opcId = jwtPayload?.opcId ?? jwtPayload?.sub ?? "";
+      if (!opcId) {
+        opcId = (await fetchUserinfo(data.access_token)) ?? data.opc_id ?? "";
+      }
       const t = {
         access_token: data.access_token,
         refresh_token: data.refresh_token,
@@ -250,7 +255,21 @@ async function fetchUserinfo(accessToken) {
     });
     if (!r.ok) return null;
     const u = await r.json();
-    return u.opcId ?? null;
+    return u.opcId ?? u.opc_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// alpha.3 修复: 从 access_token JWT 解 opcId (与 plugin decodeJwtPayload 同构)
+// 不调 userinfo API (server 端 /api/oauth/userinfo 是否存在未验, plugin 走的是 JWT 解 opcId)
+function decodeJwtPayload(token) {
+  try {
+    const payload = token.split(".")[1];
+    const b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(
+      Buffer.from(b64 + "=".repeat((4 - b64.length % 4) % 4), "base64").toString()
+    );
   } catch {
     return null;
   }
@@ -261,13 +280,21 @@ async function main() {
   const args = process.argv.slice(2);
   const cmd = args[0] || "login";
 
+  // alpha.3: 从 access_token JWT 重解 opc_id (不信任 Keychain 里老 opc_id 字段)
+  // 与 plugin decodeJwtPayload 同构
+  function resolveOpcId(t) {
+    if (!t?.access_token) return null;
+    const payload = decodeJwtPayload(t.access_token);
+    return payload?.opcId ?? payload?.sub ?? null;
+  }
+
   if (cmd === "status") {
     const t = await readToken();
     const s = tokenStatus(t);
     out({
       ok: true,
       status: s,
-      opc_id: t?.opc_id ?? null,
+      opc_id: resolveOpcId(t),
       expires_at: t ? new Date(t.expires_at).toISOString() : null,
       storage: process.platform === "darwin"
         ? `macOS Keychain (service=${KEYCHAIN_SERVICE}, account=${KEYCHAIN_ACCOUNT})`
@@ -290,7 +317,7 @@ async function main() {
       out({
         ok: true,
         stage: "already_logged_in",
-        opc_id: t.opc_id,
+        opc_id: resolveOpcId(t),
         expires_at: new Date(t.expires_at).toISOString(),
         message: "已登录, 无需重复 device flow",
       });

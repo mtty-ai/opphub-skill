@@ -1,6 +1,6 @@
 ---
 name: opphub
-version: 3.0.0-alpha.2
+version: 3.0.0-alpha.3
 description: 偶合 OppHub · OpenClaw bot skill · OPC 用户在 chat @bot 对话 · 走 device flow OAuth · 与 opphub-plugin 共 Keychain
 author: mtty-ai
 homepage: https://github.com/mtty-ai/opphub-skill
