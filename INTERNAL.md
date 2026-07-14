@@ -82,6 +82,34 @@ OpenClaw runtime → 按 user 已配 IM channel
 - announce last 通道推结果
 - **不查撮合**(plugin 替代)
 
+### cron 检测 + 自动建 (alpha.5 加, 老板 10:44 拍)
+
+- `bin/opphub-cron-setup.js` (新增):
+  - 子命令 `setup`: 幂等, 重复跑不会重复建
+  - 子命令 `status`: 查 cron 存在 + enabled + schedule + last/next run
+  - 调度: `"0 9 * * *" @ Asia/Shanghai` (可配 `OPPHUB_CRON_EXPR` / `OPPHUB_CRON_TZ` 环境变量)
+  - sessionTarget: `isolated` (老板 7/06 架构 B 拍点)
+  - delivery: announce last (老板 7/06 10:23 拍不硬编码通道)
+  - argv: `[node, bin/opphub-check-update.js]`
+
+- `bin/opphub-check-update.js` (新增):
+  - 占位 alpha.5, 比较本地 `openclaw skills info opphub` version 跟 GitHub latest release tag
+  - 返 `{ status: up_to_date | upgrade_available | unknown, local, remote, upgrade_cmd }`
+  - cron 跑出错静默不返非0 (老板 7/06 10:40 拍点, 不打扰用户)
+
+- `bin/opphub status` 加 `cron_check` 字段 (跟 plugin_check 对齐):
+  - 调 `openclaw cron list --json` 拿 jobs, 找 `name === opphub-skill-daily-check`
+  - schema: `{ installed, enabled, schedule, tz, last_run_at, next_run_at, hint }`
+
+- `bin/opphub login` 成功自动调 `cron-setup` (幂等, 不影响登录返回的 JSON)
+  - 返回加 `cron_auto_setup: action / cron_check`
+  - 加 `next_steps.bot_prompt` 给 bot 直接推自然语言话术 (老板 10:18 拍)
+
+**双轨更新检查 (alpha.4 定, alpha.5 不变)**:
+- skill cron: 只查 skill 自己版本, 走 announce last
+- plugin gateway_start (v0.6.0 起, plugin bot 跟): 查 skill + plugin 两个, 走 IM 卡片
+- 两条独立不冲突
+
 ### plugin 检测(alpha.4 加, 老板 10:38 拍)
 
 `bin/opphub status` 加了 `plugin_check` 字段, bot 不用自己 `openclaw plugins list`:

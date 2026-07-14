@@ -227,7 +227,27 @@ async function deviceFlowLogin() {
         opc_id: opcId,
         obtained_at: new Date().toISOString(),
       };
-      await writeToken(t);
+      
+  // alpha.5: 登录后自动调 cron-setup (子进程, 幂等)
+  async function runCronSetup() {
+    try {
+      const { stdout } = await execp(`node ${join(__skillDir, "bin/opphub-cron-setup.js")} setup`);
+      try {
+        const objStart = stdout.indexOf("{");
+        if (objStart >= 0) return JSON.parse(stdout.slice(objStart));
+      } catch {}
+      return { action: "spawn_failed", cron_check: null };
+    } catch (e) {
+      return { action: "spawn_error", cron_check: null, error: e.message ?? String(e) };
+    }
+  }
+
+  // alpha.5: 解 __skillDir (本脚本所在目录的上一级, 即 skill 根)
+  const __filename = (await import("node:url")).fileURLToPath(import.meta.url);
+  const __skillDir = dirname(__filename);
+  await writeToken(t);
+      // alpha.5: 登录成功自动建 cron (幂等), bot 拿 next_steps.bot_prompt 推自然语言
+      const cronSpawn = await runCronSetup();
       out({
         ok: true,
         stage: "logged_in",
@@ -236,6 +256,21 @@ async function deviceFlowLogin() {
         storage: process.platform === "darwin"
           ? `macOS Keychain (service=${KEYCHAIN_SERVICE}, account=${KEYCHAIN_ACCOUNT})`
           : `AES-256-GCM (${TOKEN_FILE})`,
+        cron_auto_setup: cronSpawn.action ?? "unknown",
+        cron_check: cronSpawn.cron_check ?? null,
+        // alpha.5: bot 拿来贴飞书卡片的自然语言话术 (老板 10:18 拍)
+        next_steps: {
+          bot_prompt: `✅ 登录成功！OPC ID: ${opcId}
+
+现在可以试试:
+· 「偶合商机」 — 看捰合市场
+· 「偶合状态」 — 看登录态 + plugin/cron
+
+📬 默认推送: cron 每天 09:00 检查 skill 更新.
+捰合推送走 server WS (需要 plugin, 没装时 bot 提示).
+
+⭐ 想秒收捰合: openclaw plugins install clawhub:@mtty-ai/opphub`,
+        },
       });
       return;
     }
@@ -313,6 +348,43 @@ async function main() {
     return { installed: false, version: null, path: null };
   }
 
+
+  // alpha.5: 查 opphub-skill-daily-check cron 是否装 + enabled + 上次跑
+  async function getCronCheck() {
+    try {
+      const { stdout } = await execp('openclaw cron list --json 2>/dev/null');
+      // openclaw 输出 {"jobs": [...]} 而且 warnings 在前, 从 { 开始拿
+      const objStart = stdout.indexOf('{');
+      const obj = JSON.parse(stdout.slice(objStart));
+      const jobs = Array.isArray(obj?.jobs) ? obj.jobs : (Array.isArray(obj) ? obj : []);
+      const job = jobs.find((j) => j.name === 'opphub-skill-daily-check' || j?.payload?.name === 'opphub-skill-daily-check');
+      if (!job) {
+        return {
+          installed: false,
+          enabled: null,
+          schedule: null,
+          last_run_at: null,
+          next_run_at: null,
+          hint: 'cron 未建 · 跑 opphub cron-setup 自动建 (幂等)',
+        };
+      }
+      return {
+        installed: true,
+        enabled: job.enabled ?? true,
+        schedule: job.schedule?.expr ?? job.schedule ?? null,
+        tz: job.schedule?.tz ?? null,
+        last_run_at: job.lastRunAtMs ? new Date(job.lastRunAtMs).toISOString() : null,
+        next_run_at: job.nextRunAtMs ? new Date(job.nextRunAtMs).toISOString() : null,
+        last_status: job.lastStatus ?? job.lastRunStatus ?? null,
+        hint: job.enabled
+          ? 'cron 已建并启用 · 每天到点自动跑'
+          : 'cron 存在但 disabled · 跑 openclaw cron enable <id>',
+      };
+    } catch (e) {
+      return { installed: null, enabled: null, schedule: null, last_run_at: null, next_run_at: null, hint: 'openclaw cron list 调用失败: ' + (e.message ?? String(e)) };
+    }
+  }
+
   if (cmd === "status") {
     const t = await readToken();
     const s = tokenStatus(t);
@@ -334,6 +406,8 @@ async function main() {
           ? `plugin v${plugin.version} 已装 · 推送走 server WS 秒级`
           : "plugin 未装 · 推送走 skill 自带 cron(每天 09:00 检查 skill 版本, 不查撮合)",
       },
+      // alpha.5 新加: cron 检测 (老板 10:44 拍)
+      cron_check: await getCronCheck(),
     });
     return;
   }

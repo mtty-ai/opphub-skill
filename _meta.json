@@ -2,7 +2,7 @@
   "ownerId": "mtty-ai",
   "slug": "opphub-skill",
   "name": "偶合 OppHub · OpenClaw bot skill",
-  "version": "3.0.0-alpha.3",
+  "version": "3.0.0-alpha.5",
   "publishedAt": "2026-07-14T10:16:00+08:00",
   "preRelease": true,
   "description": "OPC 用户在 chat @bot 对话, 走 OAuth Device Flow, 与 opphub-plugin 共 macOS Keychain / Linux AES-256-GCM",

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bin/opphub · v3.0.0-alpha.1
 # 统一入口, 把 bot 调用转发到对应 bin/*.js
-# alpha.1 只挂 oauth-login 子命令
+# alpha.5: 挂 cron-setup 子命令
 
 set -euo pipefail
 
@@ -23,6 +23,12 @@ case "$CMD" in
   status)
     exec node "$SKILL_DIR/bin/opphub-oauth-login.js" status "$@"
     ;;
+  cron-setup)
+    exec node "$SKILL_DIR/bin/opphub-cron-setup.js" setup "$@"
+    ;;
+  cron-status)
+    exec node "$SKILL_DIR/bin/opphub-cron-setup.js" status "$@"
+    ;;
   help|--help|-h|"")
     cat <<EOF
 偶合 OppHub skill · v3.0.0-alpha.1
@@ -32,7 +38,9 @@ case "$CMD" in
   oauth-login     走 OAuth Device Flow 拿 token, 写 macOS Keychain / Linux AES-256-GCM
   oauth-register  注册账号 (alpha.2 落地)
   oauth-logout    清 Keychain
-  status          看 token 状态
+  status          看 token + plugin + cron 状态
+  cron-setup      自动建 opphub-skill-daily-check cron (幂等)
+  cron-status     查 cron 状态
   help            本帮助
 
 所有子命令输出 JSON, bot 直接解析。

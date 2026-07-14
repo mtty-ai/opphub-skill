@@ -86,20 +86,26 @@ OpenClaw runtime 按你已配的 IM 通道
 - **不需要 opphub skill 装 cron 查撮合**(plugin 已经替代)
 - **不需要 opphub skill 推 IM**(plugin 推的)
 
-### skill 自带的 cron 任务(只有一个, 但分场景)
+### skill 自带的 cron 任务(alpha.5 加, 一个, 分场景)
 
 | 任务名 | 干啥 | 频率 | 通道 |
 |---|---|---|---|
-| `opphub-skill-daily-check` | 检查 skill 自身是否有新版本 | 每天 09:00(可配)| OpenClaw announce last |
+| `opphub-skill-daily-check` | 检查 skill 自身是否有新版本 | 每天 09:00 (可配 `OPPHUB_CRON_EXPR` / `OPPHUB_CRON_TZ`)| OpenClaw announce last |
 
-**仅此一个**。PRD 立场 4 破例条款:skill 允许自身运维 cron,**不允许业务 cron**(捰合推送靠 plugin)。
+**仅此一个**。PRD 立场 4 破例条款: skill 允许自身运维 cron, **不允许业务 cron** (捰合推送靠 plugin)。
+
+**alpha.5 改动**:
+- bot 调 `偶合状态` 会自动检查 cron 在不在 (返回 `cron_check` 字段, 含 installed / enabled / schedule / last_run / next_run)
+- cron 未建 → bot 提示 "跑 opphub cron-setup 自动建 (幂等)"
+- 跑 `opphub login` 成功后自动建 cron (不动已知 cron, 幂等)
+- 装完 skill 默认没建 cron, 老板不说话 bot 不动
 
 **按 plugin 状态理解 cron**:
 
-- 🟢 **plugin 已装** → cron 是保底(检查 skill 版本, 不查捰合)。plugin 双查机制 (v0.6.0 起) 走通道推卡片
+- 🟢 **plugin 已装** → cron 是保底 (检查 skill 版本, 不查捰合). plugin 双查机制 (v0.6.0 起) 走通道推卡片
 - 🟡 **plugin 未装** → cron 是唯一推送源 (但只查 skill 版本, 不查捰合, 不会让你错过捰合)
 
-⚠️ **不管 plugin 装不装, skill cron 都不查捰合**。 未装 plugin 时捰合推送按 plugin 缺失处理 (去装 plugin, 不是补 cron)。
+⚠️ **不管 plugin 装不装, skill cron 都不查捰合**. 未装 plugin 时捰合推送按 plugin 缺失处理 (去装 plugin, 不是补 cron).
 
 ---
 
