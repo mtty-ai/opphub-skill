@@ -23,6 +23,8 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
+import http from "node:http";
+import https from "node:https";
 const execp = promisify(exec);
 
 const CRON_NAME = "opphub-skill-daily-check";
@@ -94,29 +96,130 @@ async function resolveDefaultUserOpenId() {
   return "ou_9d50fceb003e656df75c234bf2ff9351";
 }
 
+
+// alpha.6 (老板 11:21 拍): 调 server /api/opc/me 拿 defaultChannel
+// 设计: skill 不再硬编码 channel, server 告诉 skill "我是谁 + 默认推哪"
+// 回退: /api/opc/me 不存在/未实现 → fallback 到本地 dev/ou_9d50fceb (alpha.5.1)
+async function fetchDefaultChannel(accessToken) {
+  // 走 server 真接口 (老板 11:18 拍架构: server 是中间层)
+  try {
+
+    const url = new URL("https://api.opphub.ruiplus.cn/api/opc/me");
+    return await new Promise((resolve) => {
+      const mod = url.protocol === "https:" ? https : http;
+      const req = mod.request(url, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Accept": "application/json",
+        },
+        timeout: 5000,
+      }, (res) => {
+        let body = "";
+        res.on("data", (d) => (body += d));
+        res.on("end", () => {
+          if (res.statusCode === 404) {
+            resolve({ source: "fallback_404", reason: "/api/opc/me 404 (server 团队待实现)" });
+            return;
+          }
+          if (res.statusCode !== 200) {
+            resolve({ source: "fallback_error", reason: `HTTP ${res.statusCode}` });
+            return;
+          }
+          try {
+            const j = JSON.parse(body);
+            // 期望: { ok: true, opcId, channels: [{channelType, accountId, recipientId, isDefault}], defaultChannel: {...} }
+            const def = j.defaultChannel ?? j.channels?.find((ch) => ch.isDefault) ?? null;
+            if (!def) {
+              resolve({ source: "fallback_no_default", reason: "server 返了但没 defaultChannel", data: j });
+              return;
+            }
+            resolve({
+              source: "server",
+              channelType: def.channelType ?? def.type,
+              accountId: def.accountId ?? def.account,
+              recipientId: def.recipientId ?? def.to,
+            });
+          } catch (e) {
+            resolve({ source: "fallback_parse_error", reason: e.message });
+          }
+        });
+      });
+      req.on("error", (e) => resolve({ source: "fallback_net_error", reason: e.message }));
+      req.on("timeout", () => { req.destroy(); resolve({ source: "fallback_timeout" }); });
+      req.end();
+    });
+  } catch (e) {
+    return { source: "fallback_exception", reason: e.message ?? String(e) };
+  }
+}
+
+// alpha.6: 读 Keychain access_token (复用 plugin v0.4.0+ 同构 - 含 base64 decode)
+async function darwinKeychainGet(account) {
+  return new Promise((resolve) => {
+    const sp = spawn("security", ["find-generic-password", "-s", "openclaw-opphub-uat", "-a", account, "-w"], { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    sp.stdout.on("data", (d) => (out += d.toString()));
+    sp.on("close", () => {
+      const t = out.trim();
+      if (!t) return resolve(null);
+      try {
+        // 与 plugin 同构: base64 decode (keychain -w 返 raw bytes 时会被 hex)
+        return resolve(Buffer.from(t, "base64").toString("utf8"));
+      } catch {
+        return resolve(t);
+      }
+    });
+    sp.on("error", () => resolve(null));
+  });
+}
+
 async function cronAdd() {
-  // 用数组传 exec (不走 sh -c), 避免中文 + 括号被 shell 转义
+  // alpha.6 (老板 11:21 拍): 从 server /api/opc/me 拿 defaultChannel
+  // 拿不到 → fallback alpha.5.1 hardcoded dev/ou_9d50fceb (老板自用)
+  let delivery = { source: "alpha5_fallback" };
+  try {
+    const raw = await darwinKeychainGet("opphub:default");
+    if (raw) {
+      const token = JSON.parse(raw);
+      const fromServer = await fetchDefaultChannel(token.access_token);
+      if (fromServer.source === "server") {
+        delivery = fromServer;
+      } else {
+        delivery.source = fromServer.source;
+        delivery.reason = fromServer.reason;
+      }
+    } else {
+      delivery.reason = "no token in keychain";
+    }
+  } catch (e) {
+    delivery.reason = e.message ?? String(e);
+  }
+
+  // fallback: 拿不到 server 给的, 用 alpha.5.1 老板自用 default
+  if (delivery.source !== "server") {
+    delivery.channelType = "feishu";
+    delivery.accountId = "dev";
+    delivery.recipientId = await resolveDefaultUserOpenId();
+  }
+
   const argv = ["node", CHECK_UPDATE_BIN];
   const args = [
-    "openclaw", "cron", "add",
+    "cron", "add",
     "--cron", DEFAULT_EXPR,
     "--tz", DEFAULT_TZ,
     "--name", CRON_NAME,
     "--description", "opphub skill daily check · check update, not 撮合",
     "--session", "isolated",
-    // 老板 11:08 拍: "default 推给当前用户"
-    // isolated session 没 last 上下文, channel=last 不能通 (实测 not-delivered)
-    // 解: 显式 --channel feishu --account dev --to 老板 open_id
-    // 老板 open_id (dev bot 视角) 从 ~/.openclaw/credentials/feishu-dev-allowFrom.json 拿
-    "--channel", "feishu",
-    "--account", "dev",
-    "--to", await resolveDefaultUserOpenId(),
+    `--channel=${delivery.channelType}`,
+    `--account=${delivery.accountId}`,
+    `--to=${delivery.recipientId}`,
     "--announce", "--best-effort-deliver",
     "--command-argv", JSON.stringify(argv),
   ];
-  // args[0]='openclaw' (binary), args[1]='cron', args[2]='add', 后面都是 options
-  const { stdout, stderr } = await execP("openclaw", ["cron", "add", ...args.slice(3)], { maxBuffer: 4 * 1024 * 1024 });
-  return { stdout, stderr };
+  // args[0]='cron', args[1]='add', execP("openclaw", [...]) 跳过这两个
+  const { stdout, stderr } = await execP("openclaw", ["cron", "add", ...args.slice(2)]);
+  return { stdout, stderr, delivery };
 }
 
 // 查 cron 状态 (含 enabled / last / next)
@@ -157,16 +260,25 @@ async function main() {
   if (cmd === "setup") {
     const existing = await cronExists();
     if (existing) {
+      const d = existing?.delivery ?? {};
+      const fromServerOrFallback = d.accountId && d.to ? {
+        source: "server_or_fallback",
+        channelType: d.channel,
+        accountId: d.accountId,
+        recipientId: d.to,
+      } : { source: "unknown" };
       out({
         ok: true,
         action: "already_installed",
         cron: shapeCron(existing),
-        hint: "幂等: 重复跑不会重复建",
+        delivery: fromServerOrFallback,
+        hint: "幂等: 重复跑不会重复建 (delivery 配置从现有 cron 读)",
       });
       return;
     }
     try {
-      const { stdout, stderr } = await cronAdd();
+      const cronAddResult = await cronAdd();
+      const { stdout, stderr } = cronAddResult;
       // 验证再建一次 (避免 --name 不接受重名 也 看不到错误)
       const after = await cronExists();
       if (!after) {
@@ -178,8 +290,11 @@ async function main() {
         cron: shapeCron(after),
         schedule_human: `${DEFAULT_EXPR} @ ${DEFAULT_TZ}`,
         argv: ["node", CHECK_UPDATE_BIN],
-        delivery: `announce -> feishu/dev -> 老板 DM (${resolvedUserId})`,
-        hint: "cron 每天 09:00 跑 check-update, 推送升级提示到老板飞书 DM",
+        delivery_source: cronAddResult.delivery.source,
+        delivery: cronAddResult.delivery,
+        hint: cronAddResult.delivery.source === "server"
+          ? "cron 每天 09:00 跑 check-update, 推送到 server 给的 defaultChannel"
+          : `cron 每天 09:00 跑 check-update, fallback 到 alpha.5.1 dev/ou_9d50fceb (${cronAddResult.delivery.reason ?? "无 reason"})`,
       });
       return;
     } catch (e) {
