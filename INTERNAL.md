@@ -82,6 +82,25 @@ OpenClaw runtime → 按 user 已配 IM channel
 - announce last 通道推结果
 - **不查撮合**(plugin 替代)
 
+### 更新检查(双轨, 不冲突 · 老板 2026-07-14 10:07 拍)
+
+| 检查器 | 谁负责 | 范围 | 通道 |
+|---|---|---|---|
+| `opphub-skill-daily-check` cron | skill | 只查 skill 自己版本 | OpenClaw announce last |
+| plugin `gateway_start` 钩子 | plugin (v0.6.0 起) | 查 skill + plugin 两个版本 | plugin IM 推送 (飞书 / 微信 / ...) |
+
+两条独立, 不重叠, 不冲突:
+
+- **skill cron 是老机制**(老板 7/06 10:14 拍保留),只管 skill 自己,**不碰 plugin**
+- **plugin 双查是新机制**(老板 7/14 10:07 拍加进 plan),管 skill + plugin 两个,推 IM 卡片
+- 两边都可能推更新提示给用户(频次低不打扰),用户收到一条就装,不会撞
+
+plugin 侧实现细节 (不在本仓范围, plugin bot 对齐):
+- `plugin/src/clawhub-check.ts` ~30-50 行
+- `gateway_start` WS 连上后跑
+- 24h cache (`~/.opphub-plugin/last-update-check.json`), 不频繁
+- 任一有新版本 → 推卡片: "⬆️ skill v3.0.1 / plugin v0.6.0 有新版本, 自己跑命令装"
+
 ---
 
 ## 5. 已知未做(给 alpha.2 / v3.0.0 列表)
