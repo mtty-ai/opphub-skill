@@ -20,14 +20,15 @@
 
 import { exec, execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 const execp = promisify(exec);
 
 const CRON_NAME = "opphub-skill-daily-check";
 const DEFAULT_EXPR = process.env.OPPHUB_CRON_EXPR || "0 9 * * *";
 const DEFAULT_TZ = process.env.OPPHUB_CRON_TZ || "Asia/Shanghai";
 // 与 skill/bin/opphub 在同目录, 引用绝对路径
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CHECK_UPDATE_BIN = join(__dirname, "opphub-check-update.js");
 
@@ -72,6 +73,27 @@ async function cronExists() {
 }
 
 // 调 openclaw cron add 建 cron (架构 B 标准模板, 老板 7/06 10:14 拍)
+
+// 老板 11:08 拍: default user = 当前用户 (这台机 dev bot 视角的老板 open_id)
+// 从 credentials 读, 没读到再 fallback 硬编码 (USER.md 钉的)
+async function resolveDefaultUserOpenId() {
+  const candidates = [
+    join(process.env.HOME || "", ".openclaw/credentials/feishu-dev-allowFrom.json"),
+    join(process.env.HOME || "", ".openclaw/credentials/feishu-dev-allowfrom.json"),
+  ];
+  for (const f of candidates) {
+    if (existsSync(f)) {
+      try {
+        const arr = JSON.parse(readFileSync(f, "utf8"));
+        if (Array.isArray(arr) && arr.length) return arr[0];
+        if (arr?.open_id) return arr.open_id;
+      } catch {}
+    }
+  }
+  // fallback: USER.md 钉死 (老板本人)
+  return "ou_9d50fceb003e656df75c234bf2ff9351";
+}
+
 async function cronAdd() {
   // 用数组传 exec (不走 sh -c), 避免中文 + 括号被 shell 转义
   const argv = ["node", CHECK_UPDATE_BIN];
@@ -82,12 +104,18 @@ async function cronAdd() {
     "--name", CRON_NAME,
     "--description", "opphub skill daily check · check update, not 撮合",
     "--session", "isolated",
-    "--announce",
-    "--channel", "last",
-    "--best-effort-deliver",
+    // 老板 11:08 拍: "default 推给当前用户"
+    // isolated session 没 last 上下文, channel=last 不能通 (实测 not-delivered)
+    // 解: 显式 --channel feishu --account dev --to 老板 open_id
+    // 老板 open_id (dev bot 视角) 从 ~/.openclaw/credentials/feishu-dev-allowFrom.json 拿
+    "--channel", "feishu",
+    "--account", "dev",
+    "--to", await resolveDefaultUserOpenId(),
+    "--announce", "--best-effort-deliver",
     "--command-argv", JSON.stringify(argv),
   ];
-  const { stdout, stderr } = await execP("openclaw", ["cron", "add", ...args.slice(2)], { maxBuffer: 4 * 1024 * 1024 });
+  // args[0]='openclaw' (binary), args[1]='cron', args[2]='add', 后面都是 options
+  const { stdout, stderr } = await execP("openclaw", ["cron", "add", ...args.slice(3)], { maxBuffer: 4 * 1024 * 1024 });
   return { stdout, stderr };
 }
 
@@ -149,9 +177,9 @@ async function main() {
         action: "created",
         cron: shapeCron(after),
         schedule_human: `${DEFAULT_EXPR} @ ${DEFAULT_TZ}`,
-        argv,
-        delivery: "announce -> channel=last",
-        hint: "老板每天 09:00 会看到 cron 任务运行结果推到已配 IM",
+        argv: ["node", CHECK_UPDATE_BIN],
+        delivery: `announce -> feishu/dev -> 老板 DM (${resolvedUserId})`,
+        hint: "cron 每天 09:00 跑 check-update, 推送升级提示到老板飞书 DM",
       });
       return;
     } catch (e) {
