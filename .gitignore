@@ -1,0 +1,8 @@
+.DS_Store
+*.bak
+.bak-*
+node_modules/
+data/
+*.log
+.idea/
+.vscode/
