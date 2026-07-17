@@ -1,15 +1,12 @@
 #!/usr/bin/env node
-// opphub-check-update.js · v3.0.0-alpha.5
+// opphub-check-update.js · v3.0.0-alpha.6.1.5
 //
-// 用途: cron 定时跑, 检查 skill 自身是否有新版本
-//       alpha.5 占位, alpha.6 实跑 clawhub inspect
-//
-// 现状(alpha.5):
-// - 跑 'openclaw skills info opphub' 拿当前 version
-// - 跑 'curl https://github.com/mtty-ai/opphub-skill/releases/latest' 拿最新 tag
-// - 对比, 有新版本就返 upgrade_available
-// - 没有新版本就返 up_to_date
-// - 错误一律静默, 不打扰用户 (老板 7/06 10:40 拍点)
+// 用途: 检查 skill 自身是否有新版本 (供 plugin 调用)
+// alpha.5 占位, alpha.6 实跑 clawhub inspect
+// alpha.6.1.5 (老板 12:46 拍): cron 不在这里, plugin 接管 cron 维护
+//   - 本输出 不直接 console.log 推 IM (plugin 负责)
+//   - 返回 JSON 结构 ({ ok, status, local, remote, commits, ... }) 供 plugin 渲染后 推 IM
+//   - 老板 7/06 10:40 拍: 错误一律静默, 不打扰用户
 
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
@@ -19,8 +16,31 @@ import { existsSync, readFileSync } from "node:fs";
 const execp = promisify(exec);
 const __skillDir = dirname(fileURLToPath(import.meta.url));
 
-function out(obj) {
-  console.log(JSON.stringify(obj, null, 2));
+// alpha.6.1.5 (老板 12:46): cron 不在这里, plugin 接管
+//   - 默认 mode=json: 返回 JSON 给 plugin 拿去渲染 + 推 IM
+//   - mode=notify: 老 cron 路径保留 (可以兼容), console.log 一行
+function out(obj, mode = "json") {
+  const status = obj?.status ?? "ok";
+  if (mode === "notify") {
+    if (status === "upgrade_available") {
+      // 兼容老 cron
+      console.log(`🆕 opphub skill v${obj.remote} (当前 v${obj.local})`);
+      console.log(`升级: ${obj.upgrade_cmd ?? "clawhub install opphub"}`);
+      if (obj.local && obj.remote) {
+        console.log(`变更: https://github.com/mtty-ai/opphub-skill/compare/v${obj.local}...v${obj.remote}`);
+      }
+    } else if (obj.ok === false) {
+      console.log(`⚠️ check-update 异常: ${obj.error ?? "unknown"}`);
+    }
+  } else {
+    // mode=json 默认: plugin 从stdout 走一行 JSON 拿
+    if (obj.ok === false) {
+      // 异常也是 stdout (plugin 不走 stderr, 一行 JSON 拿总状)
+      console.log(JSON.stringify({ ...obj, status: "error" }));
+    } else {
+      console.log(JSON.stringify(obj));
+    }
+  }
 }
 
 async function getLocalVersion() {
@@ -34,16 +54,20 @@ async function getLocalVersion() {
   ].filter(Boolean);
   for (const dir of candidates) {
     const md = join(dir, "SKILL.md");
+    if (process.env.OPPHUB_DEBUG) console.error(`[debug] try: ${dir}/SKILL.md`);
     if (existsSync(md)) {
       try {
         const content = readFileSync(md, "utf8");
         const m = content.match(/^---\n([\s\S]*?)\n---/);
         if (m) {
           const fm = m[1];
-          const vMatch = fm.match(/^version:\s*["']?([^"'\n]+)["']?/m);
+          const vMatch = fm.match(/^version:\s*["']?([^"'\n]+?)["']?\s*$/m);
+          if (process.env.OPPHUB_DEBUG) console.error(`[debug] vMatch=${JSON.stringify(vMatch)}`);
           if (vMatch) return vMatch[1].trim();
         }
-      } catch {}
+      } catch (e) {
+        if (process.env.OPPHUB_DEBUG) console.error(`[debug] err: ${e.message}`);
+      }
     }
   }
   return null;
@@ -72,53 +96,85 @@ async function getRemoteVersion() {
 }
 
 function compareSemver(a, b) {
-  // "3.0.0-alpha.5" 这种带预发布标签也算
-  const pa = a.split(".");
-  const pb = b.split(".");
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const ai = pa[i] ?? "0";
-    const bi = pb[i] ?? "0";
-    if (ai !== bi) {
-      const an = parseInt(ai.split("-")[0], 10);
-      const bn = parseInt(bi.split("-")[0], 10);
-      if (!isNaN(an) && !isNaN(bn) && an !== bn) return an - bn;
-      return ai.localeCompare(bi);
+  // alpha.6.1.2 简化 (老板 12:12 拍): cron 不关心 duex细节, 直接比含预发布字符串
+  // - "3.0.0-alpha.3" < "3.0.0-alpha.5" → -1
+  // - 退 alpha.5.1 拿 老 cron 后发生过 后台静默 拼错位置,这里改最简
+  // 用 字符串数组比, 只要 主.次.补丁 都同名, 就 localeCompare 预发布部分
+  const stripPrefix = (s) => s.replace(/^v/, "").split("-")[0];  // "3.0.0-alpha.5" → "3.0.0"
+  const mainA = stripPrefix(a);
+  const mainB = stripPrefix(b);
+  if (mainA !== mainB) {
+    const na = mainA.split(".").map((x) => parseInt(x, 10) || 0);
+    const nb = mainB.split(".").map((x) => parseInt(x, 10) || 0);
+    for (let i = 0; i < Math.max(na.length, nb.length); i++) {
+      if (na[i] !== nb[i]) return na[i] - nb[i];
     }
   }
-  return 0;
+  // 主版本同 → 预发布标签 (alpha.x) 拿 X 比
+  const preA = (a.split("-")[1] ?? "999").match(/\d+/)?.[0] ?? "999";
+  const preB = (b.split("-")[1] ?? "999").match(/\d+/)?.[0] ?? "999";
+  return parseInt(preA, 10) - parseInt(preB, 10);
 }
 
 async function main() {
+  // alpha.6.1.5 (老板 12:46): plugin 接管 cron 维护
+  //   cli 用法: `node opphub-check-update.js [--mode=notify|json]` [--kind=skill|plugin]
+  //   --mode=notify (旧, cron 场景)  --mode=json (默认, plugin 场景)
+  //   --kind=skill 查 skill, --kind=plugin 查 plugin (拿 不同仓的 SKILL.md / openclaw.plugin.json)
+  const args = process.argv.slice(2);
+  const opts = Object.fromEntries(args.filter(a => a.startsWith("--")).map(a => {
+    const [k, v] = a.replace("--", "").split("=");
+    return [k, v ?? "true"];
+  }));
+
+  const kind = opts.kind ?? "skill";
+  // alpha.6.1.5: 双检查 skill (默认) + plugin (后补)
+  // 现在仅 本文件处理 skill (plugin 仓里有自己 的 check-update.ts)
+  // plugin 仓调本脚本 是为了查 skill
+  // --kind=plugin 暂作未实现 (plugin 仓提供同 API)
+  if (kind !== "skill") {
+    out({ ok: false, status: "invalid_kind", reason: "仅 skill 本仓查, 请在 plugin 仓 调 plugin/check-update.ts" }, opts.mode);
+    return;
+  }
+
   const local = await getLocalVersion();
   const remote = await getRemoteVersion();
+  if (process.env.OPPHUB_DEBUG) {
+    console.error(`[debug] local=${JSON.stringify(local)} remote=${JSON.stringify(remote)}`);
+  }
 
   if (!local) {
-    out({ ok: true, status: "unknown", reason: "local version 不可读, 静默" });
+    out({ ok: true, status: "unknown", reason: "local version 不可读, 静默" }, opts.mode);
     return;
   }
   if (!remote) {
-    out({ ok: true, status: "unknown", reason: "remote version 不可读, 静默", local });
+    out({ ok: true, status: "unknown", reason: "remote version 不可读, 静默", local }, opts.mode);
     return;
   }
 
   const cmp = compareSemver(local, remote);
   if (cmp < 0) {
+    // alpha.6.1.5 plugin 接管 cron 后, 不需要丰富提示语 (plugin 拿这些数据 自己渲染)
+    // 仅返 plugin 需要的 fields: local/remote/upgrade_cmd/repo/source
     out({
       ok: true,
       status: "upgrade_available",
+      kind: "skill",
       local,
       remote,
       upgrade_cmd: "clawhub install opphub",
-      hint: `skill 有新版本 v${remote} (当前 v${local})`,
-    });
+      repo: "mtty-ai/opphub-skill",
+      source: "github_release_or_meta",
+      diff_url: `https://github.com/mtty-ai/opphub-skill/compare/v${local}...v${remote}`,
+    }, opts.mode);
     return;
   }
 
-  out({ ok: true, status: "up_to_date", local, remote });
+  out({ ok: true, status: "up_to_date", kind: "skill", local, remote }, opts.mode);
 }
 
 main().catch((e) => {
   // alpha.5 静默: cron 跑出错不能打扰用户
-  console.log(JSON.stringify({ ok: false, status: "error", error: e?.message ?? String(e) }));
+  out({ ok: false, status: "error", error: e?.message ?? String(e) });
   process.exit(0); // 不返非0, 让 cron 标记为 ok
 });

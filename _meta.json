@@ -2,10 +2,10 @@
   "ownerId": "mtty-ai",
   "slug": "opphub-skill",
   "name": "偶合 OppHub · OpenClaw bot skill",
-  "version": "3.0.0-alpha.5",
-  "publishedAt": "2026-07-14T10:16:00+08:00",
+  "version": "3.1.0-alpha.1",
+  "publishedAt": "2026-07-17T15:44:00+08:00",
   "preRelease": true,
-  "description": "OPC 用户在 chat @bot 对话, 走 OAuth Device Flow, 与 opphub-plugin 共 macOS Keychain / Linux AES-256-GCM",
+  "description": "OPC 用户在 chat @bot 对话, 走 OAuth Device Flow chat 版 2 步, 6 步闭环 + 开放式知识库, 与 opphub-plugin 共 macOS Keychain / Linux AES-256-GCM (plugin = source of truth, skill = reader + caller)",
   "homepage": "https://github.com/mtty-ai/opphub-skill",
   "staging": {
     "excludePaths": [

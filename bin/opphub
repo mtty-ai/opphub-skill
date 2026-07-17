@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
-# bin/opphub · v3.0.0-alpha.1
+# bin/opphub · v3.1.0-alpha.1
 # 统一入口, 把 bot 调用转发到对应 bin/*.js
-# alpha.5: 挂 cron-setup 子命令
+#
+# v3.1.0-alpha.1 (舟哥 12:40-13:41 拍板):
+#   - 加偶合配置子命令 (configure list / set)
+#   - 加 plugin-check 子命令 (读 ~/.openclaw/extensions/opphub/package.json)
+#   - 加偶合知识库子命令 (knowledge-status / knowledge-add / knowledge-autofill)
+#   - login 拆 start / poll 2 步 (chat 版 2 步走)
+#   - status 字段扩 (default_channel / knowledge_status / link_health)
+#   - 全部走 bot.skillApi IntentMessage (channel-agnostic), 不拼飞书 card JSON
 
 set -euo pipefail
 
@@ -10,6 +17,7 @@ CMD="${1:-help}"
 shift || true
 
 case "$CMD" in
+  # === v3.0 保留 ===
   oauth-login)
     exec node "$SKILL_DIR/bin/opphub-oauth-login.js" "$@"
     ;;
@@ -29,21 +37,91 @@ case "$CMD" in
   cron-status)
     exec node "$SKILL_DIR/bin/opphub-cron-setup.js" status "$@"
     ;;
+
+  # === v3.1.0-alpha.3 (舟哥 14:21 拍 "代码都得改") ===
+  # 改: skill 不再自实现 refresh (11845 bytes bin/opphub-token-refresh.js 是 dup),
+  # 改 import plugin dist/oauth-client.js (plugin = source of truth)
+  # 入口加 token-refresh 子命令直接挂 plugin client.getAccessToken (needs_refresh 自动续)
+  token-refresh)
+    # 强跑 plugin client.getAccessToken(), 内部按 status 自动选:
+    #   valid → return t.access_token
+    #   needs_refresh → 调 awaitRefreshToken, 写新 Keychain, return 新 token
+    #   expired/missing → 触发 device flow (有 openBrowser=false 时返 ok=false)
+    exec node "$SKILL_DIR/bin/opphub-token-refresh.js" --mode=auto "$@"
+    ;;
+
+  # === v3.1 新加 ===
+  login-start)
+    # 舟哥 12:44 钉: chat 版 login 2 步走
+    # 拆 start (拿 device_code + user_code + verification_url)
+    exec node "$SKILL_DIR/bin/opphub-oauth-login.js" start "$@"
+    ;;
+  login-poll)
+    # step 2: 用户点同意后, bot 调 poll 拿 access_token
+    exec node "$SKILL_DIR/bin/opphub-oauth-login.js" poll "$@"
+    ;;
+
+  configure)
+    # 舟哥 12:42/12:47 钉: configure 完必须引导装 plugin
+    SUBCMD="${1:-list}"
+    shift || true
+    exec node "$SKILL_DIR/bin/opphub-configure.js" "$SUBCMD" "$@"
+    ;;
+
+  plugin-check)
+    # 舟哥 12:47 钉: 不引导装 plugin = 配置是空的
+    # 读 ~/.openclaw/extensions/opphub/package.json
+    exec node "$SKILL_DIR/bin/opphub-plugin-check.js" "$@"
+    ;;
+
+  knowledge-status)
+    # 舟哥 12:58 钉: 能力卡片改造 → 开放式知识库
+    # GET /api/knowledge
+    exec node "$SKILL_DIR/bin/opphub-knowledge-status.js" "$@"
+    ;;
+
+  knowledge-add)
+    # 舟哥 12:58 钉: POST /api/knowledge/ingest
+    # 支持 --raw-text / --file / --url + --source-type
+    exec node "$SKILL_DIR/bin/opphub-knowledge-add.js" "$@"
+    ;;
+
+  knowledge-autofill)
+    # 舟哥 13:15+13:18 钉: 拉 15 源拼 rawText 骨架
+    # (6 本机 + 5 memory + 4 LLM 待 skill turn 补)
+    exec node "$SKILL_DIR/bin/opphub-knowledge-autofill.js" "$@"
+    ;;
+
   help|--help|-h|"")
     cat <<EOF
-偶合 OppHub skill · v3.0.0-alpha.1
+偶合 OppHub skill · v3.1.0-alpha.1
 用法: opphub <子命令>
 
-子命令:
-  oauth-login     走 OAuth Device Flow 拿 token, 写 macOS Keychain / Linux AES-256-GCM
-  oauth-register  注册账号 (alpha.2 落地)
-  oauth-logout    清 Keychain
-  status          看 token + plugin + cron 状态
-  cron-setup      自动建 opphub-skill-daily-check cron (幂等)
-  cron-status     查 cron 状态
-  help            本帮助
+[OAuth / Token]
+  oauth-login        走 OAuth Device Flow 拿 token (终端版, SSH 用)
+  login-start        chat 版 login step 1: 拿 device_code + verification_url
+  login-poll         chat 版 login step 2: 用户点同意后拿 access_token
+  token-refresh      v3.1.0-alpha.3 (货哥 14:21): 走 plugin client.getAccessToken (needs_refresh 自动续), 双源 dup 删完
+  oauth-logout       清 Keychain
+  oauth-register     注册账号 (alpha.2 落地, 见 flow/registration.md)
+
+[状态 / 维护]
+  status             看 token + plugin + cron + knowledge 状态
+  cron-setup         自动建 opphub-skill-daily-check cron (幂等)
+  cron-status        查 cron 状态
+
+[偶合配置 (Step 1-5 闭环)]
+  configure list     拿本机 channels (走 openclaw opphub channels), 出 IntentMessage 给 skill
+  configure set      PATCH /api/user/channels/default (用户 JWT, 不传 peer)
+  plugin-check       读 ~/.openclaw/extensions/opphub/package.json, 返 installed/version/path
+
+[偶合知识库 (Step 6 开放式)]
+  knowledge-status   GET /api/knowledge?opcId=xxx
+  knowledge-add      POST /api/knowledge/ingest (raw-text / file / url)
+  knowledge-autofill 拉 15 源拼 rawText 骨架 (6 本机 + 5 memory + 4 LLM)
 
 所有子命令输出 JSON, bot 直接解析。
+IntentMessage 输出格式: { ok: true, intent: { prompt, options, actions, inputHint, links, header } }
 EOF
     ;;
   *)

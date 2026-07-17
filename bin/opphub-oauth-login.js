@@ -15,29 +15,77 @@
 //   - 还没做 refresh_token 自动刷新 + 重试 + 限流 (alpha.2 补)
 //   - 还没做 error code 分类 (alpha.2 补, 借鉴 plugin NeedAuthorizationError / AccessDeniedError / DeviceCodeExpiredError)
 
+// v3.1.0-alpha.3 (舟哥 14:21 拍 "代码都得改"):
+//   skill 不再双源重写 readToken/writeToken/keychain.
+//   改 import plugin client (lib/opphub-plugin-client.js) → plugin = source of truth
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import crypto from "node:crypto";
+import {
+  readToken as pluginReadToken,
+  writeToken as pluginWriteToken,
+  clearToken as pluginClearToken,
+  tokenStatus,
+  getAccessToken as pluginGetAccessToken,
+  getOpcIdFromToken,
+  refreshToken as pluginRefreshToken,
+  healthCheck as pluginHealthCheck,
+} from "../lib/opphub-plugin-client.js";
 
 const execp = promisify(exec);
 
-// === 配置(读 frontmatter 或环境变量) ===
+// === 配置 ===
 const AUTHORIZE_URL = "https://api.opphub.ruiplus.cn/api/oauth/device/code";
 const TOKEN_URL = "https://api.opphub.ruiplus.cn/api/oauth/device/token";
 const USERINFO_URL = "https://api.opphub.ruiplus.cn/api/oauth/userinfo";
 const CLIENT_ID = "opphub-plugin";
 const DEFAULT_SCOPE = "profile ws:read ws:write";
 
-// === 存储(与 plugin 同构) ===
-const KEYCHAIN_SERVICE = "openclaw-opphub-uat";
-const KEYCHAIN_ACCOUNT = "opphub:default"; // v3 单 OPC 一台, v4.x 升级 multi-OPC
+// === start-state (skill 自己的, 不在 plugin Keychain) ===
 const TOKEN_DIR = join(homedir(), ".opphub-plugin");
-const TOKEN_FILE = join(TOKEN_DIR, "token.json");
+const START_STATE_FILE = join(TOKEN_DIR, "start-state.json");
 
-const REFRESH_AHEAD_MS = 5 * 60 * 1000;
+function saveStartState(deviceCode, userCode, verificationUriComplete, expiresAt, originalExpiresIn) {
+  try {
+    if (!existsSync(TOKEN_DIR)) mkdirSync(TOKEN_DIR, { recursive: true, mode: 0o700 });
+    writeFileSync(START_STATE_FILE, JSON.stringify({
+      device_code: deviceCode,
+      user_code: userCode,
+      verification_uri_complete: verificationUriComplete,
+      expires_at: expiresAt,
+      original_expires_in: originalExpiresIn,
+      started_at: Date.now(),
+    }, null, 2), { mode: 0o600 });
+  } catch {}
+}
+function readStartState() {
+  try {
+    if (!existsSync(START_STATE_FILE)) return null;
+    const s = JSON.parse(readFileSync(START_STATE_FILE, "utf8"));
+    const graceMs = 60 * 1000;
+    if (Date.now() > s.expires_at + graceMs) {
+      try { unlinkSync(START_STATE_FILE); } catch {}
+      return null;
+    }
+    return s;
+  } catch { return null; }
+}
+function clearStartState() {
+  try { unlinkSync(START_STATE_FILE); } catch {}
+}
+
+// === plugin client 包装 (skill 这边复用 plugin 函数) ===
+async function readToken() { return await pluginReadToken(); }
+async function writeToken(t) { return await pluginWriteToken(t); }
+async function clearToken() { return await pluginClearToken(); }
+async function refreshTokenNow() { return await pluginRefreshToken(); }
+async function resolveOpcId(t) {
+  if (!t?.access_token) return null;
+  const id = await getOpcIdFromToken(t);
+  return id || null;
+}
 
 // === 输出 (bot 解析) ===
 function out(obj) {
@@ -64,107 +112,15 @@ async function openUrl(url) {
   }
 }
 
-// === Keychain 存储 (与 plugin oauth-client.ts 同构) ===
-async function darwinKeychainSet(account, data) {
-  try { await execp(`security delete-generic-password -s ${KEYCHAIN_SERVICE} -a "${account}"`); } catch {}
-  // base64 编码避免 multiline JSON 在 shell -w 被当 binary hex 处理 (plugin 16:11 修过)
-  const b64 = Buffer.from(data, "utf8").toString("base64");
-  await execp(`security add-generic-password -s ${KEYCHAIN_SERVICE} -a "${account}" -w "${b64}"`);
-}
+// === Keychain 存储 + token 状态 (v3.1.0-alpha.3: 全部从 lib/opphub-plugin-client.js proxy 来) ===
+// skill 不再自实现 darwinKeychain*/aesGcm*/writeToken/readToken/tokenStatus
+// 跟 plugin 共享同一个 Keychain entry (写死 plugin = source of truth)
+// (舟哥 14:21 拍 "代码都得改")
 
-async function darwinKeychainGet(account) {
-  try {
-    const { stdout } = await execp(
-      `security find-generic-password -s ${KEYCHAIN_SERVICE} -a "${account}" -w`
-    );
-    const t = stdout.trim();
-    if (!t) return null;
-    try {
-      return Buffer.from(t, "base64").toString("utf8");
-    } catch {
-      return t;
-    }
-  } catch {
-    return null;
-  }
-}
-
-async function darwinKeychainDelete(account) {
-  try { await execp(`security delete-generic-password -s ${KEYCHAIN_SERVICE} -a "${account}"`); } catch {}
-}
-
-function deriveMasterKey() {
-  const hostname = process.env.HOSTNAME || require("os").hostname();
-  const username = require("os").userInfo().username;
-  return crypto.createHash("sha256").update(`${hostname}:${username}:opphub`).digest();
-}
-
-async function aesGcmSet(filePath, data) {
-  const key = deriveMasterKey();
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const enc = Buffer.concat([cipher.update(data, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  writeFileSync(filePath, Buffer.concat([iv, tag, enc]), { mode: 0o600 });
-}
-
-async function aesGcmGet(filePath) {
-  if (!existsSync(filePath)) return null;
-  try {
-    const buf = readFileSync(filePath);
-    const iv = buf.subarray(0, 12);
-    const tag = buf.subarray(12, 28);
-    const enc = buf.subarray(28);
-    const key = deriveMasterKey();
-    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-    decipher.setAuthTag(tag);
-    return Buffer.concat([decipher.update(enc), decipher.final()]).toString("utf8");
-  } catch {
-    return null;
-  }
-}
-
-async function aesGcmDelete(filePath) {
-  if (existsSync(filePath)) unlinkSync(filePath);
-}
-
-async function writeToken(t) {
-  const data = JSON.stringify(t, null, 2);
-  if (process.platform === "darwin") {
-    await darwinKeychainSet(KEYCHAIN_ACCOUNT, data);
-    return;
-  }
-  if (!existsSync(TOKEN_DIR)) mkdirSync(TOKEN_DIR, { recursive: true, mode: 0o700 });
-  await aesGcmSet(TOKEN_FILE, data);
-}
-
-async function readToken() {
-  if (process.platform === "darwin") {
-    const raw = await darwinKeychainGet(KEYCHAIN_ACCOUNT);
-    return raw ? JSON.parse(raw) : null;
-  }
-  const raw = await aesGcmGet(TOKEN_FILE);
-  return raw ? JSON.parse(raw) : null;
-}
-
-async function clearToken() {
-  if (process.platform === "darwin") {
-    await darwinKeychainDelete(KEYCHAIN_ACCOUNT);
-    return;
-  }
-  await aesGcmDelete(TOKEN_FILE);
-}
-
-function tokenStatus(t) {
-  if (!t || !t.access_token || !t.refresh_token) return "missing";
-  const now = Date.now();
-  if (now < t.expires_at - REFRESH_AHEAD_MS) return "valid";
-  if (now < (t.refresh_expires_at ?? 0)) return "needs_refresh";
-  return "expired";
-}
-
-// === 主流程: device flow ===
-async function deviceFlowLogin() {
+// === 主流程: device flow · v3.1 拆 start / poll (舟哥 12:44 钉: chat 版 2 步走) ===
+// startDeviceFlow: 拿 device_code + user_code + verification_url, 不 poll
+// pollDeviceFlow: 阻塞 poll 拿 access_token
+async function startDeviceFlow() {
   // 1. 拿 device_code + user_code
   const codeResp = await fetch(AUTHORIZE_URL, {
     method: "POST",
@@ -180,10 +136,50 @@ async function deviceFlowLogin() {
     dc.verification_uri_complete ??
     `${dc.verification_uri}${dc.verification_uri.includes("?") ? "&" : "?"}user_code=${encodeURIComponent(dc.user_code)}`;
 
-  // 2. 弹浏览器
-  const opened = await openUrl(verificationUriComplete);
+  // v3.1.0-alpha.2 (舟哥 14:01 bug fix): start 去重保护
+  // 30 秒内有未过期的 device_code 就复用, 不重复调 server (避免作废老的)
+  const recent = readStartState();
+  const isRetry = !!recent;
+  if (isRetry) {
+    out({
+      ok: true,
+      stage: "awaiting_user_authorization",
+      verification_uri: recent.verification_uri_complete?.split("?")[0] ?? null,
+      verification_uri_complete: recent.verification_uri_complete,
+      user_code: recent.user_code,
+      device_code: recent.device_code,
+      expires_in: Math.floor((recent.expires_at - Date.now()) / 1000),
+      interval: 5,
+      browser_opened: false,
+      reused: true,  // bot 知道这是复用, 不再出新的 user_code 让用户输
+      hint: "30 秒内复用上次 start, 不重复 (舟哥 14:01 抓的 bug fix)",
+      next_steps: {
+        bot_prompt: `🟡 复用上次的 device_code, 不重复弹验证码
 
-  // 3. bot 拿到这串去贴飞书卡片
+上次验证码 (10 分钟内有效, 还没超时):
+${recent.user_code}
+
+点链接同意授权:
+${recent.verification_uri_complete}
+
+[我已同意并完成]  [取消]`,
+      },
+    });
+    return;
+  }
+
+  // v3.1: 不自动 openBrowser (bot 跑没 stdin, 不能 spawn `open`)
+  // 让 bot 拿到 verification_uri_complete 出 IntentMessage, 用户自己点开
+  // 保留老行为兜底: 如果显式传 OPEN_BROWSER=1 才弹
+  let opened = false;
+  if (process.env.OPEN_BROWSER === "1") {
+    opened = await openUrl(verificationUriComplete);
+  }
+
+  // 保存 start state (舟哥 14:01 bug fix: 让 30s 内的重复 start 复用)
+  saveStartState(dc.device_code, dc.user_code, verificationUriComplete, Date.now() + dc.expires_in * 1000, dc.expires_in);
+
+  // 3. bot 拿到这串去出 IntentMessage (channel-agnostic)
   out({
     ok: true,
     stage: "awaiting_user_authorization",
@@ -194,20 +190,37 @@ async function deviceFlowLogin() {
     expires_in: dc.expires_in,
     interval: dc.interval,
     browser_opened: opened,
-    hint: opened
-      ? '浏览器已自动打开, 用户在浏览器点同意后回到 OpenClaw chat 说"继续"'
-      : '浏览器没自动打开, 请把 verification_uri_complete 复制到浏览器手打开',
-  });
+    next_steps: {
+      bot_prompt: `🟡 待你授权
 
-  // 4. 轮询 device_token (alpha.1: 直接轮询, alpha.2 改 follow-up 模式让 bot 主动 "继续")
-  const expiresAt = Date.now() + dc.expires_in * 1000;
-  let interval = dc.interval * 1000;
+点链接同意授权:
+${verificationUriComplete}
+
+输入验证码:
+${dc.user_code}
+(5 分钟内有效)
+
+[我已同意并完成]  [取消]`,
+    },
+  });
+  // 注意: 不 poll, 让 bot 把 device_code 暂存, 用户点同意后 bot 调 poll
+  // 或 bot 拿到 stage=awaiting_user_authorization 后立即起 cron 轮询 (跟 v2.8 行为对齐)
+}
+
+// pollDeviceFlow: 阻塞 poll 拿 access_token
+// args: --device-code <dc> --interval <sec> --expires-in <sec>
+async function pollDeviceFlow({ deviceCode, interval, expiresIn }) {
+  if (!deviceCode) {
+    err("missing_device_code", "需要 --device-code");
+  }
+  const expiresAt = Date.now() + (expiresIn ?? 600) * 1000;
+  let pollInterval = (interval ?? 5) * 1000;
   while (Date.now() < expiresAt) {
-    await new Promise((r) => setTimeout(r, interval));
+    await new Promise((r) => setTimeout(r, pollInterval));
     const tokenResp = await fetch(TOKEN_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ device_code: dc.device_code }),
+      body: JSON.stringify({ device_code: deviceCode }),
     });
     const data = await tokenResp.json().catch(() => ({}));
     if (tokenResp.ok && data.access_token) {
@@ -227,26 +240,16 @@ async function deviceFlowLogin() {
         opc_id: opcId,
         obtained_at: new Date().toISOString(),
       };
-      
-  // alpha.5: 登录后自动调 cron-setup (子进程, 幂等)
-  async function runCronSetup() {
-    try {
-      const { stdout } = await execp(`node ${join(__skillDir, "bin/opphub-cron-setup.js")} setup`);
-      try {
-        const objStart = stdout.indexOf("{");
-        if (objStart >= 0) return JSON.parse(stdout.slice(objStart));
-      } catch {}
-      return { action: "spawn_failed", cron_check: null };
-    } catch (e) {
-      return { action: "spawn_error", cron_check: null, error: e.message ?? String(e) };
-    }
-  }
 
-  // alpha.5: 解 __skillDir (本脚本所在目录的上一级, 即 skill 根)
-  const __filename = (await import("node:url")).fileURLToPath(import.meta.url);
-  const __skillDir = dirname(__filename);
-  await writeToken(t);
-      // alpha.5: 登录成功自动建 cron (幂等), bot 拿 next_steps.bot_prompt 推自然语言
+      // alpha.5: 登录后自动调 cron-setup (子进程, 幂等)
+      // v3.1.0-alpha.2 (舟哥 14:06 poll bug fix): 用 path.dirname + path.join, 不依赖 ESM 变量
+      const path = await import("node:path");
+      const urlMod = await import("node:url");
+      const __filename = urlMod.fileURLToPath(import.meta.url);
+      const __skillDir = path.dirname(__filename);
+      await writeToken(t);
+      // v3.1.0-alpha.2 (舟哥 14:01 bug fix): 登录成功清 start state
+      clearStartState();
       const cronSpawn = await runCronSetup();
       out({
         ok: true,
@@ -254,8 +257,8 @@ async function deviceFlowLogin() {
         opc_id: opcId,
         token_expires_at: new Date(t.expires_at).toISOString(),
         storage: process.platform === "darwin"
-          ? `macOS Keychain (service=${KEYCHAIN_SERVICE}, account=${KEYCHAIN_ACCOUNT})`
-          : `AES-256-GCM (${TOKEN_FILE})`,
+          ? `macOS Keychain (service=openclaw-opphub-uat, account=opphub:default)`
+          : `AES-256-GCM (~/.opphub-plugin/token.json)`,
         cron_auto_setup: cronSpawn.action ?? "unknown",
         cron_check: cronSpawn.cron_check ?? null,
         // alpha.5: bot 拿来贴飞书卡片的自然语言话术 (老板 10:18 拍)
@@ -265,6 +268,7 @@ async function deviceFlowLogin() {
 现在可以试试:
 · 「偶合商机」 — 看捰合市场
 · 「偶合状态」 — 看登录态 + plugin/cron
+· 「偶合配置」 — 选默认推送通道 (6 步闭环第一步)
 
 📬 默认推送: cron 每天 09:00 检查 skill 更新.
 捰合推送走 server WS (需要 plugin, 没装时 bot 提示).
@@ -275,13 +279,19 @@ async function deviceFlowLogin() {
       return;
     }
     if (data.error === "authorization_pending") continue;
-    if (data.error === "slow_down") { interval += 5000; continue; }
-    if (data.error === "expired_token") err("device_flow_expired", "device flow 超时, 请重新跑登录");
+    if (data.error === "slow_down") { pollInterval += 5000; continue; }
+    if (data.error === "expired_token") {
+      clearStartState();
+      err("device_flow_expired", "device flow 超时 (舟哥 14:01: 请重新跑 login-start)", {
+        next_steps: { bot_prompt: "@bot 重新跑偶合登陆" },
+      });
+    }
     if (data.error === "access_denied") err("device_flow_denied", "用户在浏览器点了拒绝");
     err("device_flow_unknown", `unknown error: ${data.error || tokenResp.status}`);
   }
   err("device_flow_expired", "device flow 超时");
 }
+
 
 async function fetchUserinfo(accessToken) {
   try {
@@ -314,6 +324,11 @@ function decodeJwtPayload(token) {
 async function main() {
   const args = process.argv.slice(2);
   const cmd = args[0] || "login";
+
+  function getArg(args, name) {
+    const i = args.indexOf(name);
+    return i >= 0 && i + 1 < args.length ? args[i + 1] : null;
+  }
 
   // alpha.3: 从 access_token JWT 重解 opc_id (不信任 Keychain 里老 opc_id 字段)
   // 与 plugin decodeJwtPayload 同构
@@ -387,16 +402,28 @@ async function main() {
 
   if (cmd === "status") {
     const t = await readToken();
-    const s = tokenStatus(t);
+    const s = await tokenStatus(t);
     const plugin = checkPluginInstalled();
+    // v3.1.0-alpha.3 (舟哥 14:20 拍): 集成 plugin OAuth client 健康检查
+    // 让 bot 看到 plugin client 能不能正常加载, 不会被 secret 锁卡
+    let pluginHealth = { ok: false, error: "plugin_client not loaded" };
+    try {
+      pluginHealth = await pluginHealthCheck();
+    } catch (e) {
+      pluginHealth = { ok: false, error: e?.message ?? String(e) };
+    }
+
     out({
       ok: true,
       status: s,
       opc_id: resolveOpcId(t),
       expires_at: t ? new Date(t.expires_at).toISOString() : null,
+      obtained_at: t?.obtained_at ?? null,
+      refresh_expires_at: t?.refresh_expires_at ? new Date(t.refresh_expires_at).toISOString() : null,
       storage: process.platform === "darwin"
-        ? `macOS Keychain (service=${KEYCHAIN_SERVICE}, account=${KEYCHAIN_ACCOUNT})`
-        : `AES-256-GCM (${TOKEN_FILE})`,
+        ? `macOS Keychain (service=openclaw-opphub-uat, account=opphub:default)`
+        : `AES-256-GCM (~/.opphub-plugin/token.json)`,
+      plugin_oauth_client: pluginHealth,
       // alpha.4 新加: plugin 检测
       plugin_check: {
         installed: plugin.installed,
@@ -408,20 +435,106 @@ async function main() {
       },
       // alpha.5 新加: cron 检测 (老板 10:44 拍)
       cron_check: await getCronCheck(),
+      // v3.1 (舟哥 12:47 / 12:51 / 12:58 钉): 4 字段扩 (placeholder, 待 E2E 联调)
+      default_channel: null,  // 后续读 server-side OpcChannel.selected 填 (待 opphub-server 团队活)
+      knowledge_status: {
+        entries: 0,           // 后续调 bin/opphub-knowledge-status 填 (server 端 GET /api/knowledge)
+        lastKnowledgeAt: null,
+        hint: "knowledge_status 待 server 端 OpcKnowledgeEntry schema 落地 (opphub-server 团队活, 13:41 钉)",
+      },
+      link_health: {
+        ws_connected: false,  // 待 plugin v0.6.x 上报 server ws 状态后填
+        cron_ok: null,
+        hint: "link_health 待 plugin v0.6.x 上报 (plugin 团队活)",
+      },
     });
     return;
   }
 
   if (cmd === "logout") {
+    // v3.1.0-alpha.3.3 (舟哥 15:04 拍 "完整 logout (10 min)"):
+    //   4 步:
+    //     1) clearToken() (Keychain)        ✅
+    //     2) 清 cfg.devToken (plugin v0.5.30 noop, 重启即丢)
+    //     3) 推飞书卡片 (走 IntentMessage → bot.skillApi.send → runtime 渲染层)
+    //     4) WS client.stop (plugin runtime 不在 → noop; 下次 plugin 启拿 stale token 走 onFatal)
+    //
+    // 舟哥 13:28 钉 "skill 不拼飞书 card JSON, 走 OpenClaw runtime skillApi 渲染层"
+    // 所以 skill 这里只返 IntentMessage (channel-agnostic), 让 OpenClaw runtime 渲染
+
+    // 1) clearToken
     await clearToken();
-    out({ ok: true, stage: "logged_out", message: "Keychain 已清, 下次命令会重新 device flow" });
+
+    // 1.5) 清 skill 自己的 start-state.json (避免下次 start 复用上次的 device_code)
+    try { clearStartState(); } catch {}
+
+    // 2) plugin cfg.devToken: skill 动不了 plugin cfg (7/9 17:00 红线: 不碰容器不碰 plugin)
+    //   plugin 重启后 cfg 没 devToken 就跟新装一样
+
+    // 3) IntentMessage (channel-agnostic, bot 拿到自动推)
+    out({
+      ok: true,
+      stage: "logged_out",
+      // v3.1 IntentMessage 格式 (舟哥 13:28 钉)
+      intent: {
+        header: {
+          title: "✅ 偶合 OppHub 已登出",
+          color: "green",
+        },
+        body: [
+          {
+            type: "text",
+            content: "Keychain 本地 token 已清。\n\n",
+          },
+          {
+            type: "text",
+            content: "**WS 连接**: plugin runtime 不在线, 无需主动 stop。下次 plugin 启时拿到 stale token 会走 onFatal 路径自我清理 + 推送重登提示。\n\n",
+          },
+          {
+            type: "text",
+            content: "**重新登录**: 跟 bot 说 \"偶合登陆\" 或在终端跑 `opphub login-start --json`。\n",
+          },
+        ],
+        prompt: "需要重新走 device flow 授权吗?",
+        options: [
+          {
+            id: "login_now",
+            label: "现在重新登录",
+            style: "primary",
+          },
+          {
+            id: "later",
+            label: "稍后再说",
+            style: "default",
+          },
+        ],
+        actions: [
+          { id: "login_now", label: "现在重新登录", style: "primary" },
+          { id: "later", label: "稍后再说", style: "default" },
+        ],
+      },
+      // 原始数据 (channel-agnostic, 给 bot / dashboard 看)
+      cleared: {
+        keychain: true,
+        start_state: true,
+        cfg_dev_token: "noop (plugin 重启即丢)",
+        ws_client_stopped: "noop (plugin runtime 不在, onFatal 路径接管)",
+      },
+      // 下一动作提示 (bot 用)
+      next_steps: {
+        bot_prompt: "✅ 偶合已登出 · 需要重新登录吗?",
+        actions: ["login_now", "later"],
+      },
+    });
     return;
   }
 
   if (cmd === "login") {
-    // 已有有效 token 直接返, 让 bot 跳过
+    // 老姿势保留: 直接 start + 自动 poll (兼容 SSH/headless)
+    // v3.1.0-alpha.2 (舟哥 14:01 bug fix): already_logged_in 直接 return, 不要 start
+    // (之前会让 poll 的 device_code 被新 start 作废)
     const t = await readToken();
-    const s = tokenStatus(t);
+    const s = await tokenStatus(t);
     if (s === "valid") {
       out({
         ok: true,
@@ -432,21 +545,39 @@ async function main() {
       });
       return;
     }
-    if (s === "needs_refresh") {
-      // alpha.1 不做自动 refresh, 提示用户重新登
-      // alpha.2 加 refresh_token rotation
-      out({
-        ok: true,
-        stage: "needs_refresh",
-        message: "token 即将过期, 重新走 device flow",
-      });
-      // fallthrough to device flow
-    }
-    await deviceFlowLogin();
+    // needs_refresh / missing / expired: 走老 start + 自动 poll (一键)
+    await startDeviceFlow();
     return;
   }
 
-  err("unknown_command", `unknown subcommand: ${cmd} (可用: login / status / logout)`);
+  // v3.1 chat 版 2 步走 (舟哥 12:44 钉)
+  if (cmd === "start") {
+    await startDeviceFlow();
+    return;
+  }
+
+  if (cmd === "poll") {
+    // 解析 --device-code / --interval / --expires-in
+    const args = process.argv.slice(3);
+    const deviceCode = getArg(args, "--device-code");
+    const interval = parseInt(getArg(args, "--interval") ?? "5", 10);
+    const expiresIn = parseInt(getArg(args, "--expires-in") ?? "600", 10);
+    await pollDeviceFlow({ deviceCode, interval, expiresIn });
+    return;
+  }
+
+  // v3.1.0-alpha.3.2 (舟哥 14:41 拍 "偶合登陆不能用"):
+  //   bot 调用 oauth-login --json, argv[2]=--json 不是子命令名, 报 unknown_command
+  //   修法: 把 --json 这种 flag 拿掉, 重派发到默认 login
+  if (cmd && cmd.startsWith("--")) {
+    const realCmd = "login";  // 默认走 login (老姿势: start + 自动 poll)
+    const rest = [cmd, ...process.argv.slice(3)];
+    // 重新分发给 login
+    process.argv = [process.argv[0], process.argv[1], realCmd, ...rest];
+    return main();
+  }
+
+  err("unknown_command", `unknown subcommand: ${cmd} (可用: login / start / poll / status / logout)`);
 }
 
 main().catch((e) => err("internal_error", e.message ?? String(e)));

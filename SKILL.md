@@ -1,13 +1,26 @@
 ---
 name: opphub
-version: 3.0.0-alpha.3
-description: 偶合 OppHub · OpenClaw bot skill · OPC 用户在 chat @bot 对话 · 走 device flow OAuth · 与 opphub-plugin 共 Keychain
+version: 3.1.0-alpha.1
+description: 偶合 OppHub · OpenClaw bot skill · OPC 用户在 chat @bot 对话 · 走 device flow OAuth · 6 步闭环 + 开放式知识库 · 与 opphub-plugin 共 Keychain
 author: mtty-ai
 homepage: https://github.com/mtty-ai/opphub-skill
 entry: bin/opphub
 requires:
   bins: [jq, curl, openssl, base64]
   env: []
+  # v3.1 (舟哥 13:15 + 13:18 钉): skill 调用 LLM 工具 + 本机 memory + wiki 作为数据源
+  tools:
+    - minimax__web_search           # 联网搜公司信息 (舟哥 13:15)
+    - web_fetch                      # 拉 URL (知乎/小红书/公众号/官网)
+    - minimax__understand_image      # 解析用户上传图片
+    - pdf                            # 解析 BP / 案例集 PDF
+    - memory_search                  # 搜本机 memory (舟哥 13:18)
+    - memory_get                     # 读 MEMORY.md / 某天 daily
+    - wiki_search                    # 搜 wiki 990 sources
+    - wiki_get                       # 读 wiki_page
+    - wiki_status                    # 看 wiki 状态
+    # OpenClaw runtime 注入 (不是 requires, 默认 skill turn 能调):
+    # - bot.skillApi.send / askInteractive / askFreeText / getChannel (舟哥 13:28 钉)
 defaultLocale: zh-CN
 metadata:
   api: https://api.opphub.ruiplus.cn
@@ -25,6 +38,13 @@ metadata:
       token_dir: ~/.opphub-plugin
       token_file: ~/.opphub-plugin/token.json
       encryption: AES-256-GCM
+  # v3.1 (舟哥 13:28 钉): skill 不拼原生 channel card, 走 OpenClaw runtime 渲染层
+  channelRenderer:
+    sendIntent: bot.skillApi.send
+    interactiveIntent: bot.skillApi.askInteractive
+    freeTextIntent: bot.skillApi.askFreeText
+    channel: bot.skillApi.getChannel
+    design: workspace/skills/opphub/docs/runtime-channel-renderer-v31-design.md
 ---
 
 # 偶合 OppHub · OpenClaw bot skill
