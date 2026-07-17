@@ -172,7 +172,43 @@ bot 调 `偶合状态` 会自动检查 plugin 装没装, 走两路引导:
 | 偶合状态 | `bin/opphub-status` | 读 Keychain + tokenStatus 状态机 |
 | 偶合切换账号 | `bin/opphub-oauth-logout` + `bin/opphub-oauth-login` | **当前 v3 单 OPC 一台,切换 = 重新登录**(v4.x 升级 multi-OPC) |
 | 偶合商机 | `bin/opphub-matches` | 查撮合市场 |
+| 偶合配置 list | `bin/opphub-configure list --json` | 列本机通道 + 合并 server 端 `GET /api/user/channels/default` 选中态 (⭐) |
+| 偶合配置 set | `bin/opphub-configure set --channel-type X --channel-id Y --json` | PATCH `/api/user/channels/default` (用户 JWT, 不传 peer) |
 | 偶合通道 | ⚠️ **不存在此命令** | 通道是 OpenClaw runtime 的事,本 skill 不管通道 |
+
+### `偶合配置 list` 输出示例 (v3.1.0-alpha.4.1)
+
+> 7/17 16:58 舟哥拍 "skill 没显示选中通道" → 修了
+
+```json
+{
+  "intent": {
+    "header": { "title": "选默认推送通道", "color": "blue" },
+    "prompt": "本机已配通道 · ⭐ server 选中: `feishu:pm`",
+    "options": [
+      { "id": "feishu:default",    "label": "feishu:default",                          "isDefault": false },
+      { "id": "feishu:dev",        "label": "feishu:dev",                              "isDefault": false },
+      { "id": "feishu:frontend",   "label": "feishu:frontend",                         "isDefault": false },
+      { "id": "feishu:pm",         "label": "feishu:pm ⭐",   "hint": "⭐ server 选中 (默认推送走这里)", "isDefault": true },
+      { "id": "openclaw-weixin:ece6e448d6c4-im-bot", "label": "openclaw-weixin:ece6e448d6c4-im-bot", "isDefault": false }
+    ],
+    "actions": [
+      { "id": "confirm", "label": "确认", "style": "primary" },
+      { "id": "cancel",  "label": "取消", "style": "danger" }
+    ]
+  },
+  "default_channel": {
+    "selected": { "channelType": "feishu", "channelId": "pm", "isDefault": true },
+    "hint": "默认通道已设: feishu:pm"
+  }
+}
+```
+
+**注意:**
+
+- `isDefault: true` 是 **server 端 `GET /api/user/channels/default` 真查回来的选中态**,不是写死"第一条"
+- 复用 `lib/opphub-server-client.js` 的 `getDefaultChannel()` —— `偶合状态` (oauth-login status) 也调同一个,避免两份实现飘走
+- 没选中时 `selected: null` + `hint: "未设默认通道 (跑 openclaw opphub configure)"`,所有通道 `isDefault: false`
 
 > bot 怎么把这些命令转译成自然语言,见 OpenClaw runtime 文档(不在本仓范围)。
 

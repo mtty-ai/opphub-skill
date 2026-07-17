@@ -96,23 +96,41 @@ async function cmdList() {
     });
   }
 
-  // 2. 拼 IntentMessage 给 skill → skill 调 bot.skillApi.askInteractive
+  // 2. v3.1.0-alpha.4.1 (舟哥 7/17 16:58 拍 "skill 没显示选中通道"):
+  //    合并 server 端 /api/user/channels/default 选中态
+  //    原实现: isDefault: i === 0 (写死第一条), 没真查 server
+  //    现实现: 调 getDefaultChannel() 拿 server 选中, 给对应那条打 isDefault: true
+  //    复用: lib/opphub-server-client.js (oauth-login alpha.4 16:31 抽出来的)
+  const { getDefaultChannel } = await import("../lib/opphub-server-client.js");
+  const defaultChannel = await getDefaultChannel();
+  const selected = defaultChannel.selected; // { channelType, channelId, isDefault } | null
+
+  // 3. 拼 IntentMessage 给 skill → skill 调 bot.skillApi.askInteractive
   const intent = buildInteractive({
     header: { title: "选默认推送通道", color: "blue" },
-    prompt: "本机已配通道 (有效 + 凭证校验过)",
-    options: channels.map((c, i) => ({
-      id: `${c.type}:${c.account}`,
-      label: `${c.type}:${c.account}`,
-      hint: c.valid ? "✅ 凭证齐" : c.reason,
-      isDefault: i === 0, // 第一条默认
-    })),
+    prompt: selected
+      ? `本机已配通道 · ⭐ server 选中: \`${selected.channelType}:${selected.channelId}\``
+      : "本机已配通道 (有效 + 凭证校验过)",
+    options: channels.map((c) => {
+      const isServerSelected = selected
+        && c.type === selected.channelType
+        && c.account === selected.channelId;
+      return {
+        id: `${c.type}:${c.account}`,
+        label: isServerSelected ? `${c.type}:${c.account} ⭐` : `${c.type}:${c.account}`,
+        hint: isServerSelected
+          ? "⭐ server 选中 (默认推送走这里)"
+          : (c.valid ? "✅ 凭证齐" : c.reason),
+        isDefault: !!isServerSelected,
+      };
+    }),
     actions: [
       { id: "confirm", label: "确认", style: "primary" },
       { id: "cancel", label: "取消", style: "danger" },
     ],
   });
 
-  output({ ok: true, intent, channels });
+  output({ ok: true, intent, channels, default_channel: defaultChannel });
 }
 
 async function cmdSet({ channelType, channelId }) {
