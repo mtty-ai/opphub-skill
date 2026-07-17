@@ -99,9 +99,9 @@ async function main() {
     rawText = readFileSync(args.file, "utf8");
   }
 
-  // POST /api/knowledge/ingest
+  // POST /api/user/knowledge/ingest (v3.1 舟哥 16:54)
   // (server 端: 切片 + BGE-M3 embedding + tsvector 全文 + distilledTags)
-  const url = `${API_BASE}/api/knowledge/ingest`;
+  const url = `${API_BASE}/api/user/knowledge/ingest`;
   let resp;
   try {
     resp = await fetch(url, {
@@ -130,9 +130,9 @@ async function main() {
     if (resp.status === 404 || resp.status === 501) {
       const result = {
         ok: false,
-        error: "server_not_implemented",
-        message: "server 端 /api/knowledge/ingest 未实现 (opphub-server 团队活, 13:41 钉)",
-        hint: "skill 层做完了, 等 server 端 schema + API 落地",
+        error: "server_not_deployed",
+        message: `server 返 ${resp.status}: /api/user/knowledge/ingest endpoint 未部署 (schema migration 没跑)`,
+        hint: "v3.1 endpoint 代码已就绪 (prisma/migrations/manual/20260717170000_v3.1_knowledge_entry.sql), 等舟哥拍 ECS deploy",
       };
       if (wantJson) console.log(JSON.stringify(result, null, 2));
       process.exit(0);

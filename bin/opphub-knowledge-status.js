@@ -48,7 +48,7 @@ async function main() {
 
   // 调 GET /api/knowledge?opcId=xxx (user JWT)
   // 注意: server schema OpcKnowledgeEntry 是 server 团队活, 不归 skill (13:41 钉)
-  const url = `${API_BASE}/api/knowledge`;
+  const url = `${API_BASE}/api/user/knowledge/status`;
   let resp;
   try {
     resp = await fetch(url, {
@@ -76,7 +76,7 @@ async function main() {
         entries: [],
         knowledgeCount: 0,
         lastKnowledgeAt: null,
-        hint: "server 端 /api/knowledge 未实现 (opphub-server 团队活, 13:41 钉)",
+        hint: "server 端 /api/user/knowledge/status 已就绪 (v3.1 舟哥 16:54 钉 Q2=B 异步算) (opphub-server 团队活, 13:41 钉)",
       };
       if (wantJson) console.log(JSON.stringify(result, null, 2));
       process.exit(0);
