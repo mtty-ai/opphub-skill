@@ -16,15 +16,19 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-import { readToken as pluginReadToken } from "../lib/opphub-plugin-client.js";
+import { getAccessToken as pluginGetAccessToken } from "../lib/opphub-plugin-client.js";
 
 const API_BASE = process.env.OPPHUB_API_BASE || "https://api.opphub.ruiplus.cn";
 const TOKEN_FILE = join(homedir(), ".opphub-plugin/token.json");
 
-async function readToken() {
+async function getAccessToken() {
   // v3.1.0-alpha.3 (舟哥 14:20 红纸船): 走 plugin client proxy
+  // 用 getAccessToken (不是 readToken) 让 plugin 自动 refresh 过期的 access_token
+  // getAccessToken() 返回的是 access_token 字符串 (不是 {access_token} 对象),
+  // 拋 NeedAuthorizationError 时 (plugin 不在, refresh_token 也过期) catch 返 null
   try {
-    return await pluginReadToken();
+    const accessToken = await pluginGetAccessToken();
+    return accessToken ? { access_token: accessToken } : null;
   } catch {
     return null;
   }
@@ -69,8 +73,8 @@ async function main() {
     process.exit(1);
   }
 
-  // 拿 token
-  const token = await readToken();
+  // 拿 token (走 plugin getAccessToken 自动 refresh)
+  const token = await getAccessToken();
   if (!token?.access_token) {
     const result = {
       ok: false,
