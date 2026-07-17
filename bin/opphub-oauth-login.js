@@ -549,12 +549,91 @@ async function main() {
     const t = await readToken();
     const s = await tokenStatus(t);
     if (s === "valid") {
+      // v3.1.0-alpha.3 (舟哥 7/17 16:18 拍): 已登录后引导到下一步
+      // 原始: 只返 already_logged_in 文本, 不查 plugin/configure/knowledge 状态
+      // 改造: 检查 4 件事, 哪件没做引导到下一步
+      const plugin = checkPluginInstalled();
+      const cron = await getCronCheck();
+      // knowledge_status: 调 bin/opphub-knowledge-status (subprocess)
+      // (v3.1.0-alpha.3 走 import.meta.url + 2 次 path.dirname 拿 skill 根 (不是 bin/))
+      let knowledge = null;
+      try {
+        const _urlMod = await import("node:url");
+        const _pathMod = await import("node:path");
+        const _filePath = _urlMod.fileURLToPath(import.meta.url);
+        const _skillDir = _pathMod.dirname(_pathMod.dirname(_filePath));
+        const { stdout: kStdout } = await execp(`node ${join(_skillDir, "bin/opphub-knowledge-status.js")} --json`);
+        const kObjStart = kStdout.indexOf("{");
+        if (kObjStart >= 0) knowledge = JSON.parse(kStdout.slice(kObjStart));
+      } catch {}
+      // 拼 6 步闭环状态 + 引导到下一步
+      const next = [];
+      if (!plugin.installed) {
+        next.push({
+          step: 4,
+          key: "install_plugin",
+          severity: "warn",
+          prompt: "⚠️ 还没装 opphub-plugin, 撮合推送过来没人接 = 收不到",
+          cmd: "openclaw plugins install clawhub:@mtty-ai/opphub",
+        });
+      }
+      if (!cron.installed || !cron.enabled) {
+        next.push({
+          step: 5,
+          key: "setup_cron",
+          severity: "info",
+          prompt: "💡 cron 未建 · 跑 opphub cron-setup 自动建 (幂等)",
+          cmd: "opphub cron-setup",
+        });
+      }
+      if (knowledge && knowledge.knowledgeCount === 0) {
+        next.push({
+          step: 6,
+          key: "fill_knowledge",
+          severity: "warn",
+          prompt: "⚠️ 知识库空 · 撮合匹配不精准 · 「偶合知识库」引导录入",
+          cmd: "@bot 偶合知识库",
+        });
+      }
+      // default_channel 引导: server 端 OpcChannel.selected 未实现 (opphub-server 团队活, 13:41 钉)
+      next.push({
+        step: 2,
+        key: "configure_channel",
+        severity: "info",
+        prompt: "💡 设默认推送通道 · 「偶合配置」 → 选 IM (现在 plugin 未装或走默认)",
+        cmd: "@bot 偶合配置",
+      });
+      // v3.1 IntentMessage 格式 (channel-agnostic, OpenClaw runtime 转译)
       out({
         ok: true,
         stage: "already_logged_in",
         opc_id: resolveOpcId(t),
         expires_at: new Date(t.expires_at).toISOString(),
-        message: "已登录, 无需重复 device flow",
+        // v3.1.0-alpha.3 护送: 4 件状态
+        status_snapshot: {
+          plugin: plugin.installed
+            ? { installed: true, version: plugin.version, hint: "✅ plugin v" + plugin.version + " 已装, 推送链路通" }
+            : { installed: false, hint: "⚠️ plugin 未装" },
+          cron: cron,
+          knowledge: knowledge
+            ? { entries: knowledge.knowledgeCount ?? 0, hint: knowledge.hint }
+            : { entries: null, hint: "knowledge_status 未拉取" },
+          default_channel: { selected: null, hint: "server 端 /api/me/preferred 未实现 (13:41 钉)" },
+        },
+        next_steps: {
+          bot_prompt: next.length > 0
+            ? `✅ 已登录 OPC ${resolveOpcId(t)}。\n\n` + next.map(n => `${n.prompt}\n  ${n.cmd}`).join("\n\n")
+            : `✅ 已登录 OPC ${resolveOpcId(t)}, 闭环全过 (插件装好 + cron 建好 + 知识库有内容)。`,
+          actions: next.map(n => ({
+            id: n.key,
+            label: n.prompt.split("·")[0].trim(),
+            style: n.severity === "warn" ? "primary" : "default",
+            payload: { cmd: n.cmd },
+          })),
+        },
+        message: next.length === 0
+          ? "已登录, 闭环全过"
+          : `已登录, ${next.length} 步未做`,
       });
       return;
     }
