@@ -413,6 +413,50 @@ async function main() {
     }
   }
 
+  // v3.1.0-alpha.4 (舟哥 7/17 16:31 拍): 调 GET /api/user/channels/default 真拉 server 默认通道
+  // 返回 { selected: { channelType, channelId, isDefault } | null, hint }
+  //   selected != null → 用户已设默认通道 (plugin CLI configure 设的)
+  //   selected == null → 用户没设 (走 plugin CLI configure 才会设)
+  //   err  → token 无效 / server 不通
+  async function getDefaultChannel() {
+    const tok = await readToken();
+    if (!tok?.access_token) {
+      return { selected: null, hint: "未登录 (token 缺失)" };
+    }
+    const url = `${AUTHORIZE_URL.replace("/oauth/device/code", "")}/user/channels/default`;
+    try {
+      const resp = await fetch(url, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${tok.access_token}` },
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        return {
+          selected: null,
+          hint: `server 返 ${resp.status}: ${data?.message ?? data?.error ?? "unknown"}`,
+        };
+      }
+      if (data?.ok && data?.isDefault) {
+        return {
+          selected: {
+            channelType: data.channelType,
+            channelId: data.channelId,
+            isDefault: true,
+          },
+          hint: `默认通道已设: ${data.channelType}:${data.channelId}`,
+        };
+      }
+      return {
+        selected: null,
+        hint: data?.error === "no_default"
+          ? "未设默认通道 (跑 openclaw opphub configure)"
+          : "server 返回非 ok/非 isDefault",
+      };
+    } catch (e) {
+      return { selected: null, hint: `server 调用失败: ${e?.message ?? String(e)}` };
+    }
+  }
+
   if (cmd === "status") {
     const t = await readToken();
     const s = await tokenStatus(t);
@@ -425,6 +469,13 @@ async function main() {
     } catch (e) {
       pluginHealth = { ok: false, error: e?.message ?? String(e) };
     }
+
+    // v3.1.0-alpha.4 (舟哥 7/17 16:31 拍): status 真去 server 拉 default_channel
+    // 原代码: default_channel: null (placeholder), 不查 server
+    // 真相: server GET /api/user/channels/default 返回 { channelType, channelId, isDefault }
+    //      返 { ok:false, error:"no_default" } 表示用户没设 (走 plugin CLI configure 才会设)
+    //      不是 server 团队活, 是 skill 端没去查
+    const defaultChannel = await getDefaultChannel();
 
     out({
       ok: true,
@@ -449,7 +500,7 @@ async function main() {
       // alpha.5 新加: cron 检测 (老板 10:44 拍)
       cron_check: await getCronCheck(),
       // v3.1 (舟哥 12:47 / 12:51 / 12:58 钉): 4 字段扩 (placeholder, 待 E2E 联调)
-      default_channel: null,  // 后续读 server-side OpcChannel.selected 填 (待 opphub-server 团队活)
+      default_channel: defaultChannel,  // v3.1.0-alpha.4 (舟哥 16:31): 真去 server 拉 default_channel, 不是 placeholder
       knowledge_status: {
         entries: 0,           // 后续调 bin/opphub-knowledge-status 填 (server 端 GET /api/knowledge)
         lastKnowledgeAt: null,
@@ -554,6 +605,8 @@ async function main() {
       // 改造: 检查 4 件事, 哪件没做引导到下一步
       const plugin = checkPluginInstalled();
       const cron = await getCronCheck();
+      // v3.1.0-alpha.4 (舟哥 7/17 16:31 拍): 已登录状态也去 server 拉 default_channel
+      const defaultChannel = await getDefaultChannel();
       // knowledge_status: 调 bin/opphub-knowledge-status (subprocess)
       // (v3.1.0-alpha.3 走 import.meta.url + 2 次 path.dirname 拿 skill 根 (不是 bin/))
       let knowledge = null;
@@ -595,14 +648,18 @@ async function main() {
           cmd: "@bot 偶合知识库",
         });
       }
-      // default_channel 引导: server 端 OpcChannel.selected 未实现 (opphub-server 团队活, 13:41 钉)
-      next.push({
-        step: 2,
-        key: "configure_channel",
-        severity: "info",
-        prompt: "💡 设默认推送通道 · 「偶合配置」 → 选 IM (现在 plugin 未装或走默认)",
-        cmd: "@bot 偶合配置",
-      });
+      // default_channel 引导: v3.1.0-alpha.4 (舟哥 16:31) 调 getDefaultChannel() 真拉 server,
+      //   selected != null (用户已设) → 不引导
+      //   selected == null (server 返 no_default) → 引导设默认通道
+      if (!defaultChannel.selected) {
+        next.push({
+          step: 2,
+          key: "configure_channel",
+          severity: "info",
+          prompt: "💡 设默认推送通道 · 「偶合配置」 → 选 IM (现在 plugin 未装或走默认)",
+          cmd: "@bot 偶合配置",
+        });
+      }
       // v3.1 IntentMessage 格式 (channel-agnostic, OpenClaw runtime 转译)
       out({
         ok: true,
@@ -618,7 +675,7 @@ async function main() {
           knowledge: knowledge
             ? { entries: knowledge.knowledgeCount ?? 0, hint: knowledge.hint }
             : { entries: null, hint: "knowledge_status 未拉取" },
-          default_channel: { selected: null, hint: "server 端 /api/me/preferred 未实现 (13:41 钉)" },
+          default_channel: defaultChannel,  // v3.1.0-alpha.4 (舟哥 16:31): 真拉 server 端 OpcChannel.selected
         },
         next_steps: {
           bot_prompt: next.length > 0
