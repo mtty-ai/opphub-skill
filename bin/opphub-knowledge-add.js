@@ -16,13 +16,15 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
+import { readToken as pluginReadToken } from "../lib/opphub-plugin-client.js";
+
 const API_BASE = process.env.OPPHUB_API_BASE || "https://api.opphub.ruiplus.cn";
 const TOKEN_FILE = join(homedir(), ".opphub-plugin/token.json");
 
 async function readToken() {
-  if (!existsSync(TOKEN_FILE)) return null;
+  // v3.1.0-alpha.3 (舟哥 14:20 红纸船): 走 plugin client proxy
   try {
-    return JSON.parse(readFileSync(TOKEN_FILE, "utf8"));
+    return await pluginReadToken();
   } catch {
     return null;
   }

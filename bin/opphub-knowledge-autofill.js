@@ -26,10 +26,12 @@ const HOME = homedir();
 const API_BASE = process.env.OPPHUB_API_BASE || "https://api.opphub.ruiplus.cn";
 const TOKEN_FILE = join(HOME, ".opphub-plugin/token.json");
 
+import { readToken as pluginReadToken } from "../lib/opphub-plugin-client.js";
+
 async function readToken() {
-  if (!existsSync(TOKEN_FILE)) return null;
+  // v3.1.0-alpha.3 (舟哥 14:20 红纸船): 走 plugin client proxy
   try {
-    return JSON.parse(readFileSync(TOKEN_FILE, "utf8"));
+    return await pluginReadToken();
   } catch {
     return null;
   }

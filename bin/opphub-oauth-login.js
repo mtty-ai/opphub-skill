@@ -247,6 +247,19 @@ async function pollDeviceFlow({ deviceCode, interval, expiresIn }) {
       const urlMod = await import("node:url");
       const __filename = urlMod.fileURLToPath(import.meta.url);
       const __skillDir = path.dirname(__filename);
+      // alpha.5: 登录后自动调 cron-setup (子进程, 幂等), 从 alpha.7 抄回来 (v3.1.0-alpha.1 漏定义)
+      async function runCronSetup() {
+        try {
+          const { stdout } = await execp(`node ${join(__skillDir, "bin/opphub-cron-setup.js")} setup`);
+          try {
+            const objStart = stdout.indexOf("{");
+            if (objStart >= 0) return JSON.parse(stdout.slice(objStart));
+          } catch {}
+          return { action: "spawn_failed", cron_check: null };
+        } catch (e) {
+          return { action: "spawn_error", cron_check: null, error: e?.message ?? String(e) };
+        }
+      }
       await writeToken(t);
       // v3.1.0-alpha.2 (舟哥 14:01 bug fix): 登录成功清 start state
       clearStartState();
