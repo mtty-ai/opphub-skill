@@ -90,15 +90,21 @@ function isOurCompany(partner, variants) {
 }
 
 // 类别 (按公司名关键词)
+// D1 修复: 放宽正则避免 "蓝标/京东黑珑/霍尔斯" 等特征词漏进去 other
+//   - 原版 "传媒/科技/广告" 等全靠中文关键词, 实际遇到 4-6 字公司名 不一定命中
+//   - D1 放宽: 加 "品牌/互动/商业/推广/设计/创意/数码/数字/咨询/服务" 等 16 个营销圈常见词
 function categorize(name) {
-  if (/[传媒传播映画影像]|文化|内容|拍|视|绘/.test(name)) return { code: "media", name: "影视/传媒/文化" };
-  if (/[科技网络信息]|数据|营销/.test(name)) return { code: "tech", name: "科技/网络/信息" };
-  if (/广告/.test(name)) return { code: "ad", name: "广告" };
-  if (/法律/.test(name)) return { code: "legal", name: "法律" };
-  if (/[集团股份]|有限|合伙/.test(name)) return { code: "group", name: "集团/股份" };
-  if (/[工作室]|个体|个人/.test(name)) return { code: "studio", name: "工作室/个体" };
-  if (/电商/.test(name)) return { code: "ecom", name: "电商" };
-  if (/汽车/.test(name)) return { code: "auto", name: "汽车" };
+  if (/[传媒传播映画影像]|文化|内容|拍摄|视|绘|品牌|互动|推广|设计|创意|数码|数字/.test(name)) return { code: "media", name: "影视/传媒/文化" };
+  if (/[科技网络信息]|数据|营销|商业|咨询|服务|智能|云|软件|系统|股份|有限|合伙|集团|工作室|个体|个人|汽车|电商|法律/.test(name)) {
+    if (/[科技网络信息]|数据|智能|云|软件|系统/.test(name)) return { code: "tech", name: "科技/网络/信息" };
+    if (/营销|推广|品牌|商业/.test(name)) return { code: "ad", name: "广告/营销" };
+    if (/汽车/.test(name)) return { code: "auto", name: "汽车" };
+    if (/电商/.test(name)) return { code: "ecom", name: "电商" };
+    if (/法律/.test(name)) return { code: "legal", name: "法律" };
+    if (/[集团股份]|有限|合伙/.test(name)) return { code: "group", name: "集团/股份" };
+    if (/[工作室]|个体|个人/.test(name)) return { code: "studio", name: "工作室/个体" };
+    if (/[咨询设计服务]/.test(name)) return { code: "consult", name: "咨询/服务" };
+  }
   return { code: "other", name: "其他" };
 }
 
@@ -190,6 +196,41 @@ function aggregateCards(parsedData, company, options) {
 
   // 拼 cards
   const cards = [];
+
+  // D1 修复: 未分类 top N 显式记 card (避免 "蓝标/京东黑珑/霍尔斯" 漏 other 后丢失)
+  // 拆出未分类的 top 5 公司, 单独记 dimension=客户类别/未分类 (跟其他类目同级, 不扔)
+  const UNCATEGORIZED_TOP_N = 5;
+  const otherDs = dsByCat.other;
+  if (otherDs && otherDs.count > 0) {
+    const otherCompanies = [...downstream.entries()]
+      .filter(([n]) => categorize(n).code === "other")
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, UNCATEGORIZED_TOP_N);
+    if (otherCompanies.length > 0) {
+      cards.push({
+        type: "downstream_category",
+        dimension: "客户类别/未分类",
+        emoji: "📂",
+        text: `${company} · 下游客户类别 · 未分类 (D1: 未撞中任何关键词的公司, top ${otherCompanies.length})\n\n关联客户数: ${otherDs.count} 家\n合同总金额: ¥${otherDs.total.toLocaleString("en-US", { maximumFractionDigits: 0 })}\n代表客户: ${otherCompanies.map(([n]) => n).join(", ")}\n\n(D1 补: 不准 "掉 other 里", 未撞中关键词的公司独立汇总, 舟哥可手工拍补类目)`,
+      });
+    }
+  }
+  const otherUs = usByCat.other;
+  if (otherUs && otherUs.count > 0) {
+    const otherCompanies = [...upstream.entries()]
+      .filter(([n]) => categorize(n).code === "other")
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, UNCATEGORIZED_TOP_N);
+    if (otherCompanies.length > 0) {
+      cards.push({
+        type: "upstream_category",
+        dimension: "供应商类别/未分类",
+        emoji: "📂",
+        text: `${company} · 上游供应商类别 · 未分类 (D1: 未撞中任何关键词的公司, top ${otherCompanies.length})\n\n关联供应商数: ${otherUs.count} 家\n合同总金额: ¥${otherUs.total.toLocaleString("en-US", { maximumFractionDigits: 0 })}\n代表供应商: ${otherCompanies.map(([n]) => n).join(", ")}\n\n(D1 补: 不准 "掉 other 里", 未撞中关键词的公司独立汇总, 舟哥可手工拍补类目)`,
+      });
+    }
+  }
+
   for (const [name, amt] of topCustomers) {
     cards.push({
       type: "downstream",

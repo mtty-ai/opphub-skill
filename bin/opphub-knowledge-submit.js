@@ -171,7 +171,12 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
   }
 
   // 3. 提交每条 card
-  const results = { submitted: [], deduplicated: [], conflicts: [] };
+  // A4 修复: 区分 4 种结果 — submitted / deduplicated / conflicts / errors
+  //   - errors 不算 conflicts: 含 deployment_pending (server v2 endpoint 未接)
+  //                              + network_error (网络挂)
+  //                              + server_error (401/500/...)
+  //   bot 拿 errors 不让舟哥拍 (不是 user 拍的事, 是 deploy / 网络的事)
+  const results = { submitted: [], deduplicated: [], conflicts: [], errors: [] };
 
   for (const card of cards) {
     const cardIndex = card.index ?? cards.indexOf(card);
@@ -184,6 +189,7 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
     const contentHash = sha256(text);
 
     let respData;
+    let httpStatus = 0;
     try {
       const resp = await fetch(`${API_BASE}/api/knowledge/ingest`, {
         method: "POST",
@@ -201,17 +207,37 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
           forceOverride: args.forceOverrideConflict,
         }),
       });
-      respData = await resp.json().catch(() => ({ ok: false, error: "bad_response" }));
+      httpStatus = resp.status;
+      respData = await resp.json().catch(() => ({ ok: false, error: "bad_response", httpStatus }));
     } catch (e) {
-      // 网络错 → 当冲突返 (避免静默吞错)
-      respData = {
-        ok: false,
-        conflict: true,
-        conflictReport: {
+      // 网络错 → 归 errors (不是 conflict, bot 不该拿这个让舟哥拍)
+      results.errors.push({
+        cardIndex,
+        dimension,
+        type,
+        errorReport: {
           type: "network_error",
           message: e?.message ?? String(e),
         },
-      };
+      });
+      continue;
+    }
+
+    // A4 修: server 返 404/501 (endpoint 未接) → errors/deployment_pending
+    // 之前 v3.3 commit 把它归 conflicts, 让 bot 让舟哥拍, 拍也没用 (server 没接)
+    if (httpStatus === 404 || httpStatus === 501) {
+      results.errors.push({
+        cardIndex,
+        dimension,
+        type,
+        errorReport: {
+          type: "deployment_pending",
+          httpStatus,
+          message: `server 返 ${httpStatus}: /api/knowledge/ingest v2 endpoint 未部署, 等舟哥拍 ECS deploy (7/15 钉: 本地 dev migrate, 等舟哥拍才 deploy)`,
+          hint: "v3.3 schema 已写, 等 server 接 v2 endpoint",
+        },
+      });
+      continue;
     }
 
     if (respData.ok && respData.action === "no_change") {
@@ -239,13 +265,14 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
         conflictReport: respData.conflictReport,
       });
     } else {
-      // 真错误 (401/500/...), 不算冲突, 透传给 bot
-      results.conflicts.push({
+      // 真错误 (401/500/...), 归 errors (不算 conflict, bot 拿这个不该让舟哥拍)
+      results.errors.push({
         cardIndex,
         dimension,
         type,
-        conflictReport: {
+        errorReport: {
           type: "server_error",
+          httpStatus,
           message: respData.error || respData.message || "unknown",
           raw: respData,
         },
@@ -255,21 +282,31 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
 
   // 4. 出结果
   const result = {
-    ok: true,
+    ok: results.errors.length === 0,
+    okDetail: results.errors.length === 0
+      ? null
+      : `有 ${results.errors.length} 条错误 (deployment_pending / network_error / server_error), 不是冲突, bot 不该拿这个让舟哥拍`,
     opcId,
     summary: {
       submitted: results.submitted.length,
       deduplicated: results.deduplicated.length,
       conflicts: results.conflicts.length,
+      errors: results.errors.length,
+      deploymentPending: results.errors.filter((e) => e.errorReport?.type === "deployment_pending").length,
+      networkError: results.errors.filter((e) => e.errorReport?.type === "network_error").length,
+      serverError: results.errors.filter((e) => e.errorReport?.type === "server_error").length,
     },
     submitted: results.submitted,
     deduplicated: results.deduplicated,
     conflicts: results.conflicts,
+    errors: results.errors,
     nextStep:
-      results.conflicts.length > 0
+      results.errors.length > 0
+        ? `有 ${results.errors.length} 条 error (看 errors[]), deployment_pending 等舟哥拍 ECS deploy, network/server_error 重跑`
+        : results.conflicts.length > 0
         ? "用 bot.skillApi.askInteractive 让用户拍冲突项 (保留旧的/用新的/跳过)"
         : results.submitted.length > 0
-        ? "全部成功, 下一步跑 opphub knowledge-match --entry-ids <新 entry IDs>"
+        ? "全部成功, 下一步跑 opphub knowledge-match --based-on-cards <cards.json> --json (v3.2-alpha.2 推荐姿势, 取代 --entry-ids)"
         : "全部 idempotent 命中, 无新 entry, 跑 knowledge-match 时用 deduplicated 里的 entryIds",
   };
 

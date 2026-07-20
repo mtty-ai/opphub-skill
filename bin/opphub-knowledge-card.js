@@ -282,27 +282,55 @@ async function main() {
     topTwo = inferred.topTwo;
   }
 
-  // 行业撞分 / 证据弱 → 不准拆卡, 返 ask_user
+  // 行业撞分 / 证据弱 → 不准拆卡, C2 修复: 返 askInteractive (不 process.exit)
+  //   - ambiguous: topTwo 两个选项 + askUser=true, bot 走 bot.skillApi.askInteractive 让舟哥拍
+  //   - weak:      topOne = unknown, 仅跳问 "是哪类?", 给 5 个选项 (mcn/saas/law/mfg/unknown) 让舟哥拍
   if (industryCode === "ambiguous" || industryState === "weak") {
+    // 拼 askInteractive options (industry_ambiguous 时是 topTwo; industry_weak 时是 5 个可选项)
+    const options = [];
+    if (industryCode === "ambiguous" && topTwo) {
+      for (const t of topTwo) {
+        options.push({
+          id: t.code,
+          label: `${INDUSTRY_TEMPLATES[t.code]?.emoji ?? "?"} ${INDUSTRY_TEMPLATES[t.code]?.name ?? t.code}`,
+          hint: `rawText 撞同分 ${t.score} (需舟哥拍哪个准)`,
+        });
+      }
+    } else {
+      // weak: 5 个选项都给舟哥拍
+      for (const code of ["mcn", "saas", "law", "mfg", "unknown"]) {
+        options.push({
+          id: code,
+          label: `${INDUSTRY_TEMPLATES[code]?.emoji ?? "?"} ${INDUSTRY_TEMPLATES[code]?.name ?? code}`,
+          hint: code === "unknown" ? "rawText 行业信号太弱 (顶分<=1), 不准猜" : "舟哥拍",
+        });
+      }
+    }
     const result = {
       ok: false,
       error: industryCode === "ambiguous" ? "industry_ambiguous" : "industry_weak_evidence",
       message: industryCode === "ambiguous"
-        ? "rawText 多行业信号撞同分, skill 不准 pick one — 请舟哥拍实际行业"
-        : "rawText 行业信号太弱 (顶分<=1), skill 不准猜 — 请舟哥确认行业",
+        ? "rawText 多行业信号撞同分, skill 不准 pick one — 需舟哥拍实际行业"
+        : "rawText 行业信号太弱 (顶分<=1), skill 不准猜 — 需舟哥拍行业",
       name,
       industry: { state: industryState, scores: industryScores, topTwo },
       cards: [],
       unmatchedTemplates: [],
-      nextStep: "ask user to specify --industry (mcn/saas/law/mfg), then re-run",
+      askInteractive: true,                // C2 补: 返 askInteractive 而不是 process.exit
+      options,                              // bot 走 askInteractive 时用
+      actions: [                            // bot 拿 actions 拼 "重跑" 按钮 payload
+        { id: "rerun", label: "重跑 (舟哥拍后)", style: "primary" },
+        { id: "skip",  label: "跳过 (不拆卡)",   style: "danger" },
+      ],
+      nextStep: "ask user 选行业, 然后 bot 重跑: opphub knowledge-card --raw-text <rawText> --industry <pickedCode> --json",
     };
     if (wantJson) {
       console.log(JSON.stringify(result, null, 2));
     } else {
-      console.log(`🚫 ${name}: 行业无法可靠推断, 不准按模板拆`);
+      console.log(`🚫 ${name}: 行业无法可靠推断, 不准按模板拆 (返 askInteractive 让舟哥拍)`);
       console.log(JSON.stringify(result, null, 2));
     }
-    process.exit(1);
+    // 不 process.exit (C2 修复): 让 bot 拿 options/nextStep 走 askInteractive 重跑流程
   }
 
   const template = INDUSTRY_TEMPLATES[industryCode] || INDUSTRY_TEMPLATES.unknown;

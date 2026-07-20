@@ -57,34 +57,50 @@ async function main() {
     const result = {
       ok: false,
       error: "missing_cards",
-      message: "需要 --cards cards.json (knowledge-card 的输出)",
+      message: "需要 --cards cards.json (knowledge-card 的输出) 或 --cards - (从 stdin 读, SKILL.md 阶段 5 例子姿势)",
     };
     if (wantJson) console.log(JSON.stringify(result, null, 2));
     process.exit(1);
   }
 
-  if (!existsSync(args.cards)) {
-    const result = {
-      ok: false,
-      error: "cards_not_found",
-      message: `cards 文件不存在: ${args.cards}`,
-    };
-    if (wantJson) console.log(JSON.stringify(result, null, 2));
-    process.exit(1);
-  }
-
-  const t0 = Date.now();
+  // A6 修: --cards - 走 stdin (SKILL.md 阶段 5 例子 `bin/opphub-knowledge-ingest-batch < cards.json`
+  //                            v3.3 之前 bin 拒收 stdin, 现在接上)
   let cardsData;
-  try {
-    cardsData = JSON.parse(readFileSync(args.cards, "utf8"));
-  } catch (e) {
-    const result = {
-      ok: false,
-      error: "invalid_cards_json",
-      message: e?.message ?? String(e),
-    };
-    if (wantJson) console.log(JSON.stringify(result, null, 2));
-    process.exit(1);
+  const t0 = Date.now();
+  if (args.cards === "-") {
+    try {
+      const stdinText = readFileSync(0, "utf8");
+      cardsData = JSON.parse(stdinText);
+    } catch (e) {
+      const result = {
+        ok: false,
+        error: "stdin_invalid_json",
+        message: e?.message ?? String(e),
+      };
+      if (wantJson) console.log(JSON.stringify(result, null, 2));
+      process.exit(1);
+    }
+  } else {
+    if (!existsSync(args.cards)) {
+      const result = {
+        ok: false,
+        error: "cards_not_found",
+        message: `cards 文件不存在: ${args.cards}`,
+      };
+      if (wantJson) console.log(JSON.stringify(result, null, 2));
+      process.exit(1);
+    }
+    try {
+      cardsData = JSON.parse(readFileSync(args.cards, "utf8"));
+    } catch (e) {
+      const result = {
+        ok: false,
+        error: "invalid_cards_json",
+        message: e?.message ?? String(e),
+      };
+      if (wantJson) console.log(JSON.stringify(result, null, 2));
+      process.exit(1);
+    }
   }
 
   const cards = cardsData.cards || cardsData; // 兼容直接传数组
