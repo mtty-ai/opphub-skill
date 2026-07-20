@@ -175,6 +175,7 @@ bot 调 `偶合状态` 会自动检查 plugin 装没装, 走两路引导:
 | 偶合配置 list | `bin/opphub-configure list --json` | 列本机通道 + 合并 server 端 `GET /api/user/channels/default` 选中态 (⭐) |
 | 偶合配置 set | `bin/opphub-configure set --channel-type X --channel-id Y --json` | PATCH `/api/user/channels/default` (用户 JWT, 不传 peer) |
 | 偶合通道 | ⚠️ **不存在此命令** | 通道是 OpenClaw runtime 的事,本 skill 不管通道 |
+| **录入 [公司名]** | `bin/opphub-knowledge-discover` + `opphub-knowledge-card` + `opphub-knowledge-ingest-batch` + `opphub-knowledge-match` | **v3.1 引导流程**：输入 1 个公司名，bot 全自动查 + 拆能力卡片 + 批量入库 + 跑 1 次上下游匹配 (详见下方「录入公司流程」) |
 
 ### `偶合配置 list` 输出示例 (v3.1.0-alpha.4.1)
 
@@ -220,6 +221,170 @@ bot 调 `偶合状态` 会自动检查 plugin 装没装, 走两路引导:
 - 验证码**不在公开对话框贴**(chinabot 12:04 误贴 567425 教训)
 - bot 默认 announce + channel=last,**不硬编码通道**
 - 单 OPC 一台:切换账号 = 重新登录(Keychain account 写死 `"opphub:default"`,多 OPC 支持 v4.x)
+
+---
+
+## 🏢 录入公司流程 (v3.1 · 2026-07-20 拍)
+
+> **入口收窄**：bot 在飞书群聊里收到 `录入 [公司名]` 走这个流程。
+> **设计文档**：[opphub knowledge skill 引导流程 v3.1](https://www.feishu.cn/docx/IZELdBpoeo3Gn0xavxrcJf6anhg)
+> **核心定位**：opphub 知识库是**撮合召回语料库**，不是公司档案库。入库的是**能力卡片 + 上下游关系**，不是公司描述。
+
+### 入口
+
+bot 收到 `@bot 录入 睿驰嘉禾` 后走下面 6 阶段。
+
+### 阶段 1 · 全自动查 (无打扰)
+
+bot 在后台拉数据，**不打扰用户**：
+
+| # | 数据源 | 工具 |
+|---|---|---|
+| 1 | 联网搜工商 | `minimax__web_search` + `web_fetch` |
+| 2 | 联网搜新闻 / 媒体 | `minimax__web_search` |
+| 3 | 联网搜招聘 | `minimax__web_search` |
+| 4 | 联网搜项目 / 客户 | `minimax__web_search` |
+| 5 | 本机 memory (仅参考) | `memory_search` |
+| 6 | 本机 wiki (仅参考) | `wiki_search` |
+
+**不查不参考不写库的数据**（舟哥 12:35 拍）：
+- ❌ plugin state / IM 通道 / token / oauth_userinfo / keychain
+- ❌ 本机 plugin 推送历史 / openclaw.json
+
+bot 内部执行：`bin/opphub-knowledge-discover "<公司名>"` 返 `discoverResult.rawText`。
+
+### 阶段 2 · 行业推断
+
+bot 根据工商 + 业务 + 招聘关键词**自动推断行业**，调对应**行业模板**（v3.2 第一版只覆盖 MCN + SaaS）：
+
+| 行业 | 推断信号 |
+|---|---|
+| MCN / 数字营销 | "短视频 / KOL / 达人 / 视频号 / MCN" |
+| SaaS / 撮合 | "SaaS / 撮合 / 平台 / API" |
+| 律所 | "诉讼 / 律所 / 律师" |
+| 制造 | "注塑 / 模具 / 装配" |
+| 其他 | 走"通用模板"，等后续添加 |
+
+bot 内部执行：`bin/opphub-knowledge-card "<公司名>"` 返 `cards[]` 数组（能力/行业/上下游/同业 4 类）。
+
+### 阶段 3 · 拆能力卡片
+
+按行业模板拆 N 条 entry，**每条独立**（便于按类型召回）：
+
+```
+能力卡片 5 条（按业务方向，如"达人营销" 1 条，不按平台拆）
+行业经验 3 条（按行业 + 创始人背景）
+上下游 4 条（上游 = 需要的资源，下游 = 服务的客户）
+同业 1-3 条（能力重叠 → 竞争 / 资源互补）
+```
+
+### 阶段 4 · ⭐ 提醒用户 1 次（确认入库）
+
+bot 输出 1 张清单给用户，**只问 1 次**：
+
+```
+📋 睿驰嘉禾（推断行业：MCN / 数字营销）
+按 MCN 模板拆 12 条准备入库：
+
+【能力卡片 × 5】
+✅ 达人营销 - KOL 投放 / 媒介代理
+✅ 短视频内容制作 - 视频号/抖音/小红书
+✅ 平台代运营 - 视频号 / 抖音账号代运营
+✅ 电商转化 - 抖音/快手电商闭环
+✅ 虚拟人 IP 孵化 - 数字人 / IP 孵化
+
+【行业经验 × 3】
+✅ 汽车 - 京东黑珑 / 易车背景
+✅ 金融 - 蓝色光标背景
+✅ 电商 - 京东零售背景
+
+【上下游 × 4】
+⬆️ 上游：自媒体 KOL 资源（双微抖音快手小红书 B 站）
+⬆️ 上游：拍摄场地 / 后期制作
+⬇️ 下游：腾讯视频号品牌方
+⬇️ 下游：汽车 / 金融 / 电商客户
+
+是否入库？（回 "入库" / "跳过 X" / "调整 X"）
+```
+
+**颗粒度**：每条 1 行 + emoji 标识，**不列原文**（避免信息过载）。
+
+### 阶段 5 · 批量入库
+
+用户回 "入库" 后，bot 批量调 `bin/opphub-knowledge-add` 每条 1 个 entry：
+
+```bash
+for card in "${cards[@]}"; do
+  opphub-knowledge-add --raw-text "$card.text" --source-type auto --json
+done
+```
+
+**入库后不返回每条详情**，只返 1 张总览：
+
+```
+✅ 12 条已入库（entries: 12, lastKnowledgeAt: 2026-07-20T04:32:xx）
+```
+
+bot 内部：`bin/opphub-knowledge-ingest-batch < cards.json`。
+
+### 阶段 6 · ⭐ 跑 1 次匹配（撮合模拟）
+
+入库完**立刻**跑匹配，**只看上下游 + 同业**两类关系：
+
+```
+📊 匹配结果：
+
+【上游命中】（你需要，opphub 里已有 OPC 能提供）
+🎯 KOL 投放资源 → OPC "xx MCN" 提供（score 0.78）
+
+【下游命中】（你能提供，opphub 里已有 OPC 需要）
+🎯 视频号品牌方 → OPC "xx 品牌" 寻找中（score 0.81）
+
+【同业关联】（能力重叠）
+⚠️ OPC "xx 广告" 也提供达人营销
+```
+
+**匹配逻辑**：
+- 上游匹配：刚入库的 "上游依赖 X" → opphub 知识库搜 "提供 X"
+- 下游匹配：刚入库的 "下游服务 Y" → opphub 知识库搜 "需要 Y"
+- 同业关联：刚入库的 "能力 Z" → opphub 知识库搜 "也提供 Z"
+
+**如果知识库 OPC < 5 条**：
+
+```
+💡 知识库只有 X 条 OPC 录入，匹配有限。建议邀请更多 OPC 用户录入后再跑匹配。
+```
+
+bot 内部：`bin/opphub-knowledge-match --based-on-cards cards.json`。
+
+### 🚦 流程边界
+
+**不主动问用户的问题**（减少打扰，舟哥 12:25 拍）：
+- ❌ 主营业务 / 团队 / 创始人 / 客户案例 → bot 联网搜
+- ❌ 行业 / 模板 / 上下游 / 同业 → bot 自动推断
+- ❌ 关联匹配结果 → bot 自动跑
+
+**只问 1 次**：
+- ✅ "是否入库？"（阶段 4）
+
+**完全不问**：
+- ✅ 匹配结果的解读 → bot 直接出 1 张清单
+
+### ⏳ 实施状态 (v3.2 alpha)
+
+| 阶段 | 实现状态 | bin |
+|---|---|---|
+| 阶段 1 discover | 🚧 待实现 | `bin/opphub-knowledge-discover.js` |
+| 阶段 2-3 card | 🚧 待实现 | `bin/opphub-knowledge-card.js` |
+| 阶段 4 UI | ✅ 已设计（输出格式定）| — |
+| 阶段 5 ingest-batch | 🚧 待实现 | `bin/opphub-knowledge-ingest-batch.js` |
+| 阶段 6 match | 🚧 待实现 | `bin/opphub-knowledge-match.js` |
+
+v3.1 阶段（当前）：
+- ✅ `bin/opphub-knowledge-add.js` (单条入库)
+- ✅ `bin/opphub-knowledge-status.js` (知识库状态)
+- ✅ `bin/opphub-knowledge-search.js` (向量召回)
+- ✅ `bin/opphub-knowledge-autofill.js` (本地 6 源拼骨架, 已废弃 — 本机运维数据跟能力画像无关)
 
 ---
 
