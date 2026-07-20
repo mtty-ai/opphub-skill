@@ -35,6 +35,7 @@
 
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -43,6 +44,7 @@ function parseArgs(argv) {
     if (a === "--json") args.json = true;
     else if (a === "--name") args.name = argv[++i];
     else if (a === "--raw-text") args.rawText = argv[++i];
+    else if (a === "--web-results") args.webResults = argv[++i];
     else if (!a.startsWith("--")) args._.push(a);
   }
   return args;
@@ -92,7 +94,22 @@ async function main() {
   // raw-text 优先 (bot 已调 LLM 拼好)
   if (args.rawText) {
     // 舟哥 7/20 13:00 拍: rawText 接收时必须验证 (防止拼错公司名 / 查不到数据)
-    const validation = validateRawText(args.name || "", args.rawText);
+    // 舟哥 7/20 13:03 拍: 加拼写纠错 (web_results 传 web_search 返的 JSON 或文件路径)
+    let webResults = null;
+    if (args.webResults) {
+      try {
+        webResults = JSON.parse(args.webResults);
+      } catch {
+        if (existsSync(args.webResults)) {
+          try {
+            webResults = JSON.parse(readFileSync(args.webResults, "utf8"));
+          } catch {
+            // ignore, webResults 保持 null
+          }
+        }
+      }
+    }
+    const validation = validateRawText(args.name || "", args.rawText, webResults);
     const result = {
       ok: validation.ok,
       mode: "raw-text-passthrough",
@@ -105,9 +122,14 @@ async function main() {
         ok: validation.ok,
         issues: validation.issues,
         warnings: validation.warnings,
+        suggestions: validation.suggestions || [],
       },
       durationMs: Date.now() - t0,
-      nextStep: validation.ok ? "knowledge-card --raw-text <rawText>" : "fix issues then re-run",
+      nextStep: validation.ok
+        ? "knowledge-card --raw-text <rawText>"
+        : (validation.suggestions && validation.suggestions.length > 0)
+          ? "ask user to confirm suggested company name, then re-run with --name <correct>"
+          : "ask user to re-input company name",
     };
     if (validation.issues.length > 0) {
       result.error = validation.issues.map((i) => i.message).join("; ");
@@ -123,6 +145,13 @@ async function main() {
         for (const i of validation.issues) console.log(`  [${i.severity}] ${i.type}: ${i.message}`);
       }
       for (const w of validation.warnings) console.log(`  ⚠️ ${w.type}: ${w.message}`);
+      if (validation.suggestions && validation.suggestions.length > 0) {
+        console.log(`\n💡 拼写纠错候选 (top ${validation.suggestions.length}):`);
+        for (const s of validation.suggestions) {
+          console.log(`  📌 ${s.name} (相似度 ${(s.similarity * 100).toFixed(0)}%)`);
+        }
+        console.log(`\n下一步: 问舟哥确认候选名 / 重输, 然后 --name <correct> --raw-text <newRawText> 重跑`);
+      }
     }
     if (!validation.ok) process.exit(1);
     return;
@@ -153,11 +182,10 @@ async function main() {
   }
 }
 
-// raw-text 模式增加: 公司名验证 + rawText 完整性检查
+// raw-text 模式增加: 公司名验证 + rawText 完整性检查 + 拼写纠错候选
 // 舟哥 7/20 13:00 拍: 两个都加 (双保险)
-//   1. 公司名验证: 检查 rawText 里是否真提到了该公司 (避免拼错公司名)
-//   2. rawText 完整性: 检查 "未找到 / 拼写 / 疑似" 等关键词占比, 太高则拒绝
-function validateRawText(name, rawText) {
+// 舟哥 7/20 13:03 拍: 加拼写纠错 (用 web_search 返 top 3 相似公司名候选)
+function validateRawText(name, rawText, webResults) {
   const issues = [];
   const warnings = [];
   let ok = true;
@@ -199,7 +227,88 @@ function validateRawText(name, rawText) {
     });
   }
 
-  return { ok, issues, warnings };
+  // 3. 拼写纠错 (舟哥 7/20 13:03 拍): 用 web_results 找 top 3 相似公司名候选
+  let suggestions = [];
+  if (!ok && webResults && Array.isArray(webResults)) {
+    suggestions = suggestCorrections(name, webResults);
+    if (suggestions.length > 0) {
+      warnings.push({
+        type: "spelling_suggestions",
+        suggestions: suggestions.map((s) => ({ name: s.name, similarity: s.similarity })),
+        message: `识别到 ${suggestions.length} 个相似公司名候选, 是否拼错了?`,
+      });
+    }
+  }
+
+  return { ok, issues, warnings, suggestions };
+}
+
+// 编辑距离 (Levenshtein)
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const m = [];
+  for (let i = 0; i <= b.length; i++) m[i] = [i];
+  for (let j = 0; j <= a.length; j++) m[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      m[i][j] = b[i - 1] === a[j - 1]
+        ? m[i - 1][j - 1]
+        : Math.min(m[i - 1][j - 1] + 1, m[i][j - 1] + 1, m[i - 1][j] + 1);
+    }
+  }
+  return m[b.length][a.length];
+}
+
+// 相似度 (0-1, 1=完全相同)
+function similarity(a, b) {
+  if (!a || !b) return 0;
+  const dist = levenshtein(a, b);
+  const maxLen = Math.max(a.length, b.length);
+  return 1 - dist / maxLen;
+}
+
+// 从 web_results 找相似公司名 (舟哥 7/20 13:03 拍)
+// webResults: bot web_search 返回的 [{title, link, snippet}, ...]
+// 提取 title/snippet 里的公司名 (正则: Xxx公司 / Xxx有限公司 / Xxx集团 / Xxx工作室)
+function suggestCorrections(name, webResults) {
+  const seen = new Set();
+  const candidates = [];
+  for (const r of webResults) {
+    const text = `${r.title || ""} ${r.snippet || ""}`;
+    const matches = text.match(/[\u4e00-\u9fa5（）()A-Za-z0-9·]{2,30}(?:有限公司|股份有限公司|集团|公司|工作室|事务所)/g) || [];
+    for (const m of matches) {
+      const cleanName = m.replace(/[（）()]/g, "").trim();
+      if (cleanName === name || seen.has(cleanName)) continue;
+      seen.add(cleanName);
+      // 去前缀 + 去后缀
+      const stripCore = (s) => {
+        let r = s.replace(/^(上海|北京|广州|深圳|杭州|成都|南京|武汉|苏州|天津|重庆)/, "");
+        for (const suf of ["有限公司", "股份有限公司", "集团", "事务所", "工作室"]) {
+          r = r.replace(new RegExp(suf + "$"), "");
+        }
+        return r.trim();
+      };
+      const nameCore = stripCore(name);
+      const candCore = stripCore(cleanName);
+      // 组合相似度: 取 max(核心对比, 首 4 字对比)
+      //   - 核心对比: 防业务后缀 (数字传媒科技) 拉低相似度
+      //   - 首 4 字: 防全名太长让小差异被淹没 (睿驰佳禾 vs 睿驰嘉禾数字传媒科技 4字差异)
+      const simCore = similarity(nameCore, candCore);
+      const simPrefix = nameCore.length >= 3 && candCore.length >= 3
+        ? similarity(nameCore.slice(0, 4), candCore.slice(0, 4))
+        : 0;
+      const containMatch = nameCore.length >= 2 && candCore.includes(nameCore);
+      const containMatch2 = candCore.length >= 2 && nameCore.includes(candCore);
+      const finalSim = containMatch || containMatch2 ? Math.max(simCore, simPrefix, 0.9) : Math.max(simCore, simPrefix);
+      if (finalSim >= 0.5) {
+        candidates.push({ name: cleanName, similarity: finalSim });
+      }
+    }
+  }
+  candidates.sort((a, b) => b.similarity - a.similarity);
+  return candidates.slice(0, 3);
 }
 
 main().catch((e) => {
