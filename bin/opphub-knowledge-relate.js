@@ -41,6 +41,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--json") args.json = true;
+    else if (a === "--help" || a === "-h") args.help = true;
     else if (a === "--xls") args.xls = argv[++i];
     else if (a === "--company") args.company = argv[++i];
     else if (a === "--top-customers") args.topCustomers = parseInt(argv[++i], 10);
@@ -246,6 +247,47 @@ function aggregateCards(parsedData, company, options) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const wantJson = args.json;
+
+  // --help / -h: 打印用法, 不走 xls 解析
+  if (args.help) {
+    console.log(`opphub-knowledge-relate · v3.2.0-alpha.2
+
+用途: 录入公司间的合作关系 (上下游), 不是公司本身的能力画像.
+场景: 传合同 xls (甲方/乙方/金额/项目), 拆出 top 客户 + top 供应商 + 类别聚合.
+
+用法:
+  opphub knowledge-relate --xls <path> --company "公司名" [options]
+
+必选参数:
+  --xls <path>           合同 xls 路径 (HTML 格式, 从浏览器另存为)
+  --company "公司名"     你的公司名 (容错匹配: 括号/多主体/分公司前缀)
+
+可选参数:
+  --top-customers <n>    top 下游客户数量 (默认 20)
+  --top-suppliers <n>    top 上游供应商数量 (默认 10)
+  --cards-out <path>     拆好的 cards JSON 写到文件 (可选, 默认 stdout)
+  --json                 输出 JSON (默认开启)
+
+输出 (JSON):
+  {
+    ok: true,
+    company: "睿驰嘉禾",
+    summary: { upstreamCount, downstreamCount, totalAmount },
+    partners: { upstream: [...], downstream: [...] },
+    cards: [ ... 40 条 ... ],
+    cardCount: 40
+  }
+
+跟能力画像流程的区别:
+  能力画像 (v3.2 alpha.1): 答"这公司能做什么", 数据源 = LLM 联网
+  关联公司 (v3.2 alpha.2): 答"这公司跟谁合作", 数据源 = xls 合同清单
+
+下一步:
+  opphub knowledge-ingest-batch --cards <cards.json> --json  # 批量入库
+  opphub knowledge-search --q "公司名" --json                # 验证召回
+`);
+    process.exit(0);
+  }
 
   if (!args.xls || !args.company) {
     const result = {

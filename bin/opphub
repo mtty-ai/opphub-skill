@@ -92,6 +92,59 @@ case "$CMD" in
     exec node "$SKILL_DIR/bin/opphub-knowledge-autofill.js" "$@"
     ;;
 
+  # === v3.2.0-alpha.1 (舟哥 7/20 12:31 拍: 录入公司流程 阶段 1) ===
+  # 阶段 1: 生成 queryPlan (skill turn 据此调 web_search/web_fetch/memory/wiki 填 rawText)
+  # 阶段 2: 接收 skill turn 拼好的 rawText 验证 + 透传
+  knowledge-discover)
+    # bot 调: opphub knowledge-discover --name "公司名" [--raw-text "<bot 拼好的>"] --json
+    # 返 queryPlan (mode=query-plan) 或 验证后的 rawText (mode=raw-text-passthrough)
+    exec node "$SKILL_DIR/bin/opphub-knowledge-discover.js" "$@"
+    ;;
+
+  # === v3.2.0-alpha.2 (舟哥 7/20 12:46 拍: 录入公司流程 阶段 2-3) ===
+  knowledge-card)
+    # bot 调: opphub knowledge-card --name "公司名" --raw-text "<阶段 1 返的>" --json
+    # 按行业模板拆 4 类卡 (ability/industry/upstream/downstream/peer)
+    exec node "$SKILL_DIR/bin/opphub-knowledge-card.js" "$@"
+    ;;
+
+  # === v3.2.0-alpha.2 (舟哥 7/20 12:46 拍: 录入公司流程 阶段 5) ===
+  knowledge-ingest-batch)
+    # bot 调: opphub knowledge-ingest-batch --cards <cards.json> --json
+    # 批量入库 (循环调 knowledge-add)
+    exec node "$SKILL_DIR/bin/opphub-knowledge-ingest-batch.js" "$@"
+    ;;
+
+  # === v3.2.0-alpha.2 (舟哥 7/20 12:47 拍: 录入公司流程 阶段 6) ===
+  knowledge-match)
+    # bot 调: opphub knowledge-match --name "公司名" --entry-ids <ids.json> --json
+    # 上下游 + 同业 关联匹配 (查 opphub 知识库已有 OPC)
+    exec node "$SKILL_DIR/bin/opphub-knowledge-match.js" "$@"
+    ;;
+
+  # === v3.2.0-alpha.1 (7/20 12:17 加: 知识库向量召回) ===
+  knowledge-search)
+    # bot 调: opphub knowledge-search --q "<query>" [--count 10] [--min-score 0.5]
+    # 向量召回已有 entry
+    exec node "$SKILL_DIR/bin/opphub-knowledge-search.js" "$@"
+    ;;
+
+  # === v3.2.0-alpha.2 (7/20 12:55 拍: 录入关联公司 - xls 解析) ===
+  knowledge-relate)
+    # bot 调: opphub knowledge-relate --xls <path> --company "公司名" --json
+    # 解析合同 xls, 拆 top 客户 / top 供应商 / 类别聚合
+    exec node "$SKILL_DIR/bin/opphub-knowledge-relate.js" "$@"
+    ;;
+
+  # === v3.3.0 (舟哥 7/20 17:30 拍: skill/server 职责重划) ===
+  # idempotent ingest + 冲突检测 + 软链覆盖 (取代 v3.2 的 ingest-batch 循环调 add)
+  # server 端 4 种响应: created / no_change / soft_chain_override / conflict
+  knowledge-submit)
+    # bot 调: opphub knowledge-submit --cards <cards.json> [--force-override-conflict] --json
+    # 取代 ingest-batch, 加 idempotencyKey + contentHash
+    exec node "$SKILL_DIR/bin/opphub-knowledge-submit.js" "$@"
+    ;;
+
   help|--help|-h|"")
     cat <<EOF
 偶合 OppHub skill · v3.1.0-alpha.1
@@ -119,6 +172,20 @@ case "$CMD" in
   knowledge-status   GET /api/knowledge?opcId=xxx
   knowledge-add      POST /api/knowledge/ingest (raw-text / file / url)
   knowledge-autofill 拉 15 源拼 rawText 骨架 (6 本机 + 5 memory + 4 LLM)
+  knowledge-search   向量召回知识库 entry
+
+[偶合录入公司 (v3.2 引导流程 阶段 1-6)]
+  knowledge-discover 阶段 1: 生成 queryPlan / 接收 rawText 验证
+  knowledge-card     阶段 2-3: 按行业模板拆 能力/上下游/同业 卡
+  knowledge-submit   阶段 5 (v3.3 新): idempotent 批量入库 + 冲突检测
+  knowledge-ingest-batch 阶段 5 (v3.2 旧): 循环调 knowledge-add, 保留兼容
+  knowledge-match    阶段 6: 上下游 + 同业 关联匹配 (查 opphub 知识库)
+
+[偶合录入关联公司 (v3.2 alpha.2)]
+  knowledge-relate   解析合同 xls, 拆 top 客户 / top 供应商 / 类别聚合
+
+[偶合商机 (TODO: 与知识库匹配结果合并)]
+  ⚠️ 暂无独立 matches 子命令, 走 knowledge-match (上下游/同业关联)
 
 所有子命令输出 JSON, bot 直接解析。
 IntentMessage 输出格式: { ok: true, intent: { prompt, options, actions, inputHint, links, header } }

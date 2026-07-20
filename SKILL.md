@@ -49,7 +49,7 @@ metadata:
 
 # 偶合 OppHub · OpenClaw bot skill
 
-> **bot skill,不是 CLI skill**。OPC 用户在飞书群聊 @bot 说"偶合注册"/"偶合商机"即可,bot 自动调底层 bin 命令(JSON 输出)。
+> **bot skill,不是 CLI skill**。OPC 用户在飞书群聊 @bot 说"偶合注册"/"偶合录入 [公司名]"/"偶合商机"即可,bot 自动调底层 bin 命令(JSON 输出)。
 
 ---
 
@@ -59,12 +59,17 @@ metadata:
 
 ### 1. 注册账号
 
+> ⚠️ **alpha.2 stub**：bot 收到"偶合注册"会返 `not_implemented`。
+> bin 待写（调 `POST /api/auth/code/send` + `POST /api/auth/register`）。详见 [`flow/registration.md`](flow/registration.md)。
+
 在飞书群聊里 @bot 说:
 
 > 偶合注册
 
 bot 会问:**邮箱还是手机**? 你直接回复「邮箱 you@example.com」或「手机 13800138000」即可。
 bot 会把验证码发到对应渠道(5 分钟内有效),**私下问你**输入 6 位数字,不会在群里贴。
+
+**注册成功 ≠ 登录成功**：`/api/auth/register` 返的是 30 天 `opphubToken`（profile 凭证），**走 device flow 拿的 access_token 才是 plugin WS 推送凭证**。注册完还要走第 2 步偶合登录。
 
 ### 2. 登录拿到 token(走 device flow)
 
@@ -78,7 +83,7 @@ bot 调 `bin/opphub-oauth-login` 走 OAuth Device Flow:
 3. token 自动写 macOS Keychain / Linux 加密文件
 4. bot 告诉你 ✅ opc_id = opc_xxx
 
-**完成后即可开始用**,问 bot "偶合商机" / "偶合状态" 都行。
+**完成后即可开始用**,问 bot "偶合录入 [公司名]" / "偶合状态" 都行。偶合商机暂为占位语义,实际跑 knowledge-match 上下游/同业关联匹配。
 
 ---
 
@@ -166,12 +171,12 @@ bot 调 `偶合状态` 会自动检查 plugin 装没装, 走两路引导:
 
 | bot 自然语言 | bin 命令 | 说明 |
 |---|---|---|
-| 偶合注册 | `bin/opphub-oauth-register` | v3 走 OAuth,email 或 phone 注册,见 [`flow/registration.md`](flow/registration.md) |
+| 偶合注册 | `bin/opphub-oauth-register` | ⚠️ **alpha.2 stub 未实现**，bot 调返 `not_implemented`。server 接口在 `/api/auth/code/send` + `/api/auth/register`，bin 待写。详见 [`flow/registration.md`](flow/registration.md) |
 | 偶合登录 | `bin/opphub-oauth-login` | **新·device flow**,写 Keychain |
 | 偶合退出 | `bin/opphub-oauth-logout` | **新·** 清 Keychain,下个命令强制重新 device flow |
 | 偶合状态 | `bin/opphub-status` | 读 Keychain + tokenStatus 状态机 |
 | 偶合切换账号 | `bin/opphub-oauth-logout` + `bin/opphub-oauth-login` | **当前 v3 单 OPC 一台,切换 = 重新登录**(v4.x 升级 multi-OPC) |
-| 偶合商机 | `bin/opphub-matches` | 查撮合市场 |
+| 偶合商机 | `bin/opphub-knowledge-match` | ⚠️ **改名**：原计划 `bin/opphub-matches` 未实现，现以知识库关联匹配（上下游 + 同业）代替。语义：已录入 OPC 间的供需/同业关系匹配，不是撮合市场查询。详细见录入公司流程 §阶段 6 |
 | 偶合配置 list | `bin/opphub-configure list --json` | 列本机通道 + 合并 server 端 `GET /api/user/channels/default` 选中态 (⭐) |
 | 偶合配置 set | `bin/opphub-configure set --channel-type X --channel-id Y --json` | PATCH `/api/user/channels/default` (用户 JWT, 不传 peer) |
 | 偶合通道 | ⚠️ **不存在此命令** | 通道是 OpenClaw runtime 的事,本 skill 不管通道 |
@@ -230,6 +235,21 @@ bot 调 `偶合状态` 会自动检查 plugin 装没装, 走两路引导:
 > **入口收窄**：bot 在飞书群聊里收到 `录入 [公司名]` 走这个流程。
 > **设计文档**：[opphub knowledge skill 引导流程 v3.1](https://www.feishu.cn/docx/IZELdBpoeo3Gn0xavxrcJf6anhg)
 > **核心定位**：opphub 知识库是**撮合召回语料库**，不是公司档案库。入库的是**能力卡片 + 上下游关系**，不是公司描述。
+
+### 🚨 红线 (舟哥 7/20 13:35 钉死): 不允许 skill 编写和瞎猜
+
+> **事件**: 7/20 13:31 我没联网,凭 daily memo 残影编了"创始人=舟哥 / 业务群=A/B/C",**公司名称都没验证**。
+>
+> **skill 铁律** (任何 bin / LLM / bot turn 都生效):
+>
+> 1. **不联网 = 不准答业务信息** — 阶段 1 没真查 `minimax__web_search` / `web_fetch`,就返 `validation.ok=false` + `error=not_searched`,**绝不** 拿本机 memory / workspace 文件凑答案
+> 2. **不基于拼错的关键词推断** — 公司名拼错(缺字/多字/同音) → 返拼写纠错候选,不准"看着像就对"
+> 3. **不模板填空** — `opphub-knowledge-card` 现在按行业模板填默认 card (达人营销/IP 孵化),**只准填 rawText 真出现的事实**,模板词当"未查到"标
+> 4. **不假装推断行业** — 行业分撞同 (mcn=saas) → 不准 pick one,要写 `ambiguous` + 让用户拍
+> 5. **不写未出现的字段** — 法人/注册资本/地址查询未命中 → 写 `(未查到)`,不写 `(待补)` 假设值
+> 6. **company name mismatch 拒收** — `--name` 跟 rawText 提的公司不一致 → `validation.ok=false`,skill 不入库
+>
+> **bot turn 上下文**: LLM 工具 (web_search / web_fetch) 由 OpenClaw skill turn 调,**LLM 没真拿到数据 = 没数据**。任何"凭印象"补全都算瞎猜。
 
 ### 入口
 
@@ -375,11 +395,11 @@ bot 内部：`bin/opphub-knowledge-match --based-on-cards cards.json`。
 
 | 阶段 | 实现状态 | bin |
 |---|---|---|
-| 阶段 1 discover | 🚧 待实现 | `bin/opphub-knowledge-discover.js` |
-| 阶段 2-3 card | 🚧 待实现 | `bin/opphub-knowledge-card.js` |
+| 阶段 1 discover | ✅ 已实现 (7/20 13:07) | `bin/opphub-knowledge-discover.js` |
+| 阶段 2-3 card | ✅ 已实现 (7/20 13:36) | `bin/opphub-knowledge-card.js` |
 | 阶段 4 UI | ✅ 已设计（输出格式定）| — |
-| 阶段 5 ingest-batch | 🚧 待实现 | `bin/opphub-knowledge-ingest-batch.js` |
-| 阶段 6 match | 🚧 待实现 | `bin/opphub-knowledge-match.js` |
+| 阶段 5 ingest-batch | ✅ 已实现 (7/20 12:46) | `bin/opphub-knowledge-ingest-batch.js` |
+| 阶段 6 match | ✅ 已实现 (7/20 12:47) | `bin/opphub-knowledge-match.js` |
 
 v3.1 阶段（当前）：
 - ✅ `bin/opphub-knowledge-add.js` (单条入库)
@@ -498,6 +518,116 @@ opphub knowledge-search --q "北京果合" --json
 | 想秒收撮合但只在 09:00 收到 | skill 没装 plugin,跑 `openclaw plugins install clawhub:@mtty-ai/opphub` |
 
 更多排错(限流 / 重试 / server 路径):见 [`INTERNAL.md`](INTERNAL.md)(运维,本仓库根目录,不进 skill 包)。
+
+---
+
+## 🔒 v3.3 idempotent ingest · 幂等入库 + 去重 + 冲突处理（舟哥 7/20 17:30 拍）
+
+> **职责重划**（v3.3 设计原则）：
+> - **skill = 采集者 + 翻译者**，只产 rawText。**不做去重 / 冲突判断 / 版本管理**
+> - **server = 仓库 + 处理器**，做去重 / 冲突检测 / 版本管理 / 蒸馏 / 嵌入 / 召回
+> - **幂等性 + 冲突处理**都在 server 端按 **content-addressable + idempotencyKey** 双重保险
+
+### 为什么需要 v3.3
+
+v3.1 录入流程跑一遍就发现 3 个真问题（7/20 17:23 撞出）：
+1. **无去重**：server `OpcKnowledgeEntry.create()` 直接 create，0 个 unique constraint（除 entry.id 主键）→ 同 OPC 同 rawText 提交 2 次 = 2 条 entry
+2. **无幂等键**：改 1 个错别字只能新建 entry，原 entry 还在
+3. **无冲突检测**：录入有矛盾字段时静默入库
+
+### 幂等键设计（skill 端算，server 端验）
+
+```js
+// skill 端 (bin/opphub-knowledge-submit.js)
+const idempotencyKey = sha256(`${opcId}|${type}|${dimension}`);
+const contentHash    = sha256(rawText);
+//   - 同 OPC 同 type+dimension → 同 key → server 走 upsert 路径
+//   - 改 rawText (改 1 个错别字) → contentHash 变但 key 不变 → server 比 hash
+```
+
+### server 端 4 种响应（v2 idempotent 接口）
+
+```jsonc
+// 1. 新增成功
+{ "ok": true, "action": "created", "entryId": "cmxxx" }
+
+// 2. 幂等命中 (rawText 没变)
+{ "ok": true, "action": "no_change", "entryId": "cmxxx" }
+
+// 3. 软链覆盖 (rawText 变了但无关键字段冲突)
+{ "ok": true, "action": "soft_chain_override", "entryId": "cmyyy", "previousEntryId": "cmxxx" }
+
+// 4. 冲突返报告 (rawText 变了 + 关键字段冲突, 不入库, 等用户拍)
+{ "ok": false, "conflict": true, "conflictReport": { "entryId": "cmxxx", "conflictFields": ["legal_person: 刘会冬 → 张老板"], ... } }
+```
+
+### skill 端流程（v3.3）
+
+```
+阶段 4 bot 给舟哥看:
+  ✅ 新提交 7 条 (submitted)
+  🔁 已有 3 条 (deduplicated, 跳过)
+  ⚠️ 冲突 1 条 (要拍):
+    - 能力卡片 · 虚拟人 IP 孵化
+      老: 数字人形象设计
+      新: 虚拟主播代运营
+      冲突字段: 业务描述
+
+阶段 5 bot 调:
+  opphub-knowledge-submit --cards cards.json
+  (取代 v3.2 的 opphub-knowledge-ingest-batch 循环调 knowledge-add)
+```
+
+### bot 处理冲突
+
+按 v3.1 §阶段 4 设计, bot 用 `IntentMessage.askInteractive` 让舟哥拍冲突项:
+```
+- "保留旧的"  → server 跳过新 entry, 保留老 entry
+- "用新的"    → server 软链覆盖 (老 superseded, 新覆盖)
+- "跳过"      → server 不动该 card, 跳过入库
+```
+
+舟哥拍 "用新的" 后, bot 调:
+```
+opphub knowledge-submit --cards cards.json --force-override-conflict
+```
+server 跳过冲突检测, 强制 soft_chain_override。
+
+### schema 改造 (归 server 团队, 等 opphub-web 接)
+
+最小 6 个字段 + 1 个 unique:
+
+```prisma
+model OpcKnowledgeEntry {
+  ... 现有字段 ...
+  
+  idempotencyKey  String? @map("idempotency_key")     // SHA256 hash
+  contentHash     String? @map("content_hash")        // 当前 rawText 的 hash
+  entryType       String? @map("entry_type")          // ability / upstream / downstream / peer
+  entryDimension  String? @map("entry_dimension")     // 达人营销 / KOL 资源 / ...
+  previousEntryId String? @map("previous_entry_id")   // 软链 (被覆盖的旧 entry)
+  supersededAt    DateTime? @map("superseded_at")     // 非 null 即被新 entry 取代
+  
+  @@unique([opcId, idempotencyKey])
+  @@index([opcId, entryType, entryDimension])
+  @@index([supersededAt])
+}
+```
+
+**为什么必须加 entryType + entryDimension?**
+
+舟哥 7/20 12:58 拍"字段概念彻底不要, 整段自由文本进知识库"—— 但 **去重键必须 1 个结构化锚点**:
+- 不存 entryType/dimension → skill 端只能拿 rawText 整个 hash → 改 1 个字算新 entry
+- 存 entryType/dimension → 语义级去重（睿驰嘉禾的"达人营销"和"达人营销能力"算同一类）
+
+**7/20 12:58 的精神是"字段不过度设计"**, 但 idempotencyKey + entryType + entryDimension 是去重的最低必要字段, 不属于"过度字段化"。
+
+### 关联文档
+
+- **server schema v3.2 设计稿**: `workspace/skills/opphub/docs/server-schema-v32-design.md` (跟 v3.1 平行)
+- **workboard 卡**: `v3.3-skill-server-separation-2026-07-20` (id=bc34d33f-...)
+- **MEMORY 红线**: `~/.openclaw/workspace-dev/MEMORY.md` §v3.3 backlog
+- **不动的事**: ECS schema deploy / skill 端去重 / OpcProfile / OpcSkillCard / OpenClaw runtime 渲染层 / plugin 仓
 
 ---
 
