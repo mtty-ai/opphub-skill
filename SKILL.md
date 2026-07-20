@@ -176,6 +176,7 @@ bot 调 `偶合状态` 会自动检查 plugin 装没装, 走两路引导:
 | 偶合配置 set | `bin/opphub-configure set --channel-type X --channel-id Y --json` | PATCH `/api/user/channels/default` (用户 JWT, 不传 peer) |
 | 偶合通道 | ⚠️ **不存在此命令** | 通道是 OpenClaw runtime 的事,本 skill 不管通道 |
 | **录入 [公司名]** | `bin/opphub-knowledge-discover` + `opphub-knowledge-card` + `opphub-knowledge-ingest-batch` + `opphub-knowledge-match` | **v3.1 引导流程**：输入 1 个公司名，bot 全自动查 + 拆能力卡片 + 批量入库 + 跑 1 次上下游匹配 (详见下方「录入公司流程」) |
+| **录入关联公司** | `bin/opphub-knowledge-relate` + `opphub-knowledge-ingest-batch` | **v3.2 alpha.2 扩展**：传合同 xls + 公司名, 自动拆上下游 (top 客户 / top 供应商 / 类别聚合), 批量入库 (详见下方「录入关联公司」) |
 
 ### `偶合配置 list` 输出示例 (v3.1.0-alpha.4.1)
 
@@ -385,6 +386,104 @@ v3.1 阶段（当前）：
 - ✅ `bin/opphub-knowledge-status.js` (知识库状态)
 - ✅ `bin/opphub-knowledge-search.js` (向量召回)
 - ✅ `bin/opphub-knowledge-autofill.js` (本地 6 源拼骨架, 已废弃 — 本机运维数据跟能力画像无关)
+
+---
+
+## 🤝 录入关联公司 (v3.2 alpha.2 · 7/20 12:55 拍)
+
+> **用途**：录入公司间的合作关系（上下游），不是公司本身的能力画像。
+> **场景**：传合同 xls（甲方/乙方/金额/项目），拆出 top 客户 + top 供应商 + 类别聚合。
+> **跟能力画像的区别**：能力画像答"这公司能做什么"，关联公司答"这公司跟谁合作"。
+
+### 入口
+
+bot 收到 `@bot 录入睿驰嘉禾的关联公司` + 附件 .xls。
+
+### 阶段 1 · 自动解析 xls
+
+```bash
+opphub knowledge-relate \
+  --xls /path/to/contracts.xls \
+  --company "睿驰嘉禾" \
+  --top-customers 20 \
+  --top-suppliers 10 \
+  --cards-out /tmp/cards.json \
+  --json
+```
+
+输出：
+```json
+{
+  "ok": true,
+  "company": "睿驰嘉禾",
+  "summary": {
+    "upstreamCount": 22, "downstreamCount": 147,
+    "upstreamCompanyCount": 18, "downstreamCompanyCount": 99,
+    "totalAmount": 9693820.81
+  },
+  "partners": {
+    "upstream": [{"name": "上海自然堂集团有限公司", "amount": 505558}, ...],
+    "downstream": [{"name": "北京果合文化传媒有限公司", "amount": 2339806}, ...]
+  },
+  "cards": [ ... 40 条 ... ],
+  "cardCount": 40
+}
+```
+
+### 阶段 2 · 拆 cards (top + 类别聚合)
+
+按 C 方案（v3.2 alpha.2 默认）：
+- top 20 下游客户 (按金额) → 20 条 `type=downstream` entry
+- top 10 上游供应商 (按金额) → 10 条 `type=upstream` entry
+- 下游类别聚合 (按公司名关键词: 影视/科技/广告/集团/...) → 最多 8 条 `type=downstream_category` entry
+- 上游类别聚合 → 最多 4 条 `type=upstream_category` entry
+
+### 阶段 3 · 批量入库 (复用 ingest-batch)
+
+```bash
+opphub knowledge-ingest-batch --cards /tmp/cards.json --json
+```
+
+返回：
+```json
+{
+  "ok": true,
+  "ingestedCount": 40,
+  "skippedCount": 0,
+  "ingested": [{"cardIndex": 0, "type": "downstream", "dimension": "客户/北京果合", "entryId": "cmrs..."}, ...]
+}
+```
+
+### 阶段 4 · 搜索召回（验证用）
+
+```bash
+opphub knowledge-search --q "北京果合" --json
+# → 命中 10 条下游客户相关 entry
+```
+
+### 🚦 跟能力画像流程的区别
+
+| 维度 | 能力画像（v3.2 alpha.1）| 关联公司（v3.2 alpha.2）|
+|---|---|---|
+| 数据源 | LLM 联网搜 + 本机 memory/wiki | xls 合同清单 |
+| 输入 | 1 个公司名 | 公司名 + xls 附件 |
+| 拆 entry 维度 | 能力 / 行业经验 / 上下游(模板)/ 同业 | top 客户 / top 供应商 / 类别聚合 |
+| 卡数量 | ~11 条 | ~40 条 (top 20+10 + 类别 12) |
+| 类别聚合粒度 | 按行业模板 (MCN/SaaS 维度) | 按公司名关键词 (传媒/科技/...) |
+
+### 不做的事
+
+- ❌ 不调 LLM (skill turn 的活, 解析 xls 不需要)
+- ❌ 不入库 OPC 元数据 / 通道列表 / token (舟哥 12:35 拍)
+- ❌ 不分析关联公司本身的业务 (那是能力画像流程)
+- ❌ 不抓外部 xls (bot 已经下载好)
+
+### ⏳ 实施状态
+
+- ✅ `bin/opphub-knowledge-relate.js` (xls 解析 + 拆 cards)
+- ✅ `bin/opphub-knowledge-ingest-batch.js` (复用)
+- ⏳ 阶段 4 UI 提醒 (跟能力画像同款)
+- ⏳ server 端 source_type: card-ability / card-upstream / card-downstream / card-peer (舟哥未拍)
 
 ---
 
