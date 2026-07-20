@@ -91,19 +91,40 @@ async function main() {
 
   // raw-text 优先 (bot 已调 LLM 拼好)
   if (args.rawText) {
+    // 舟哥 7/20 13:00 拍: rawText 接收时必须验证 (防止拼错公司名 / 查不到数据)
+    const validation = validateRawText(args.name || "", args.rawText);
     const result = {
-      ok: true,
+      ok: validation.ok,
       mode: "raw-text-passthrough",
       name: args.name || "(未指定, 由 rawText 推断)",
       rawText: args.rawText,
       sources: [
         { category: "passthrough", name: "bot_skill_turn", status: "received" },
       ],
+      validation: {
+        ok: validation.ok,
+        issues: validation.issues,
+        warnings: validation.warnings,
+      },
       durationMs: Date.now() - t0,
-      nextStep: "knowledge-card --raw-text <rawText>",
+      nextStep: validation.ok ? "knowledge-card --raw-text <rawText>" : "fix issues then re-run",
     };
-    if (wantJson) console.log(JSON.stringify(result, null, 2));
-    else console.log(`✅ rawText received (${args.rawText.length} chars), next: knowledge-card`);
+    if (validation.issues.length > 0) {
+      result.error = validation.issues.map((i) => i.message).join("; ");
+    }
+    if (wantJson) {
+      console.log(JSON.stringify(result, null, 2));
+      if (!validation.ok) process.exit(1);
+    } else {
+      if (validation.ok) {
+        console.log(`✅ rawText received (${args.rawText.length} chars), next: knowledge-card`);
+      } else {
+        console.log(`❌ rawText 验证失败:`);
+        for (const i of validation.issues) console.log(`  [${i.severity}] ${i.type}: ${i.message}`);
+      }
+      for (const w of validation.warnings) console.log(`  ⚠️ ${w.type}: ${w.message}`);
+    }
+    if (!validation.ok) process.exit(1);
     return;
   }
 
@@ -130,6 +151,55 @@ async function main() {
     }
     console.log(`\n下一步: skill turn 调 LLM/web 工具填骨架, 再用 --raw-text <filledRawText> 重跑`);
   }
+}
+
+// raw-text 模式增加: 公司名验证 + rawText 完整性检查
+// 舟哥 7/20 13:00 拍: 两个都加 (双保险)
+//   1. 公司名验证: 检查 rawText 里是否真提到了该公司 (避免拼错公司名)
+//   2. rawText 完整性: 检查 "未找到 / 拼写 / 疑似" 等关键词占比, 太高则拒绝
+function validateRawText(name, rawText) {
+  const issues = [];
+  const warnings = [];
+  let ok = true;
+
+  // 1. 公司名验证: rawText 里必须出现公司名核心 (>=4 字) 或其简体
+  const nameCore = name.replace(/^(上海|北京|广州|深圳|杭州|成都|南京|武汉|苏州|天津|重庆)/, "").replace(/(有限公司|股份有限公司|集团|公司)$/, "").trim();
+  let nameFound = false;
+  if (nameCore && nameCore.length >= 2) {
+    nameFound = rawText.includes(nameCore) || rawText.includes(name);
+  }
+  if (!nameFound && rawText.length > 0) {
+    issues.push({
+      type: "company_name_not_found",
+      severity: "error",
+      message: `rawText 里没找到公司名 "${name}" (核心: "${nameCore}"), 可能是拼错了公司名`,
+    });
+    ok = false;
+  }
+
+  // 2. rawText 完整性: 计算 "未找到 / 未搜到 / 拼写 / 疑似" 等关键词出现次数
+  const missingKeywords = ["未找到", "未搜到", "拼写错误", "疑似拼错", "找不到", "no result", "not found"];
+  const missingCount = missingKeywords.reduce((acc, kw) => {
+    const matches = rawText.match(new RegExp(kw, "g"));
+    return acc + (matches ? matches.length : 0);
+  }, 0);
+  const sectionCount = (rawText.match(/^##\s+\d+\./gm) || []).length;
+  const missingRatio = sectionCount > 0 ? missingCount / sectionCount : 0;
+  if (missingRatio > 0.5 && missingCount >= 2) {
+    issues.push({
+      type: "rawtext_incomplete",
+      severity: "error",
+      message: `rawText 里 ${missingCount} 个 "未找到" / "拼写错误" 等关键词, 占比 ${(missingRatio * 100).toFixed(0)}% (> 50%). skill turn 查不到数据, 不该拆卡入库`,
+    });
+    ok = false;
+  } else if (missingCount >= 1) {
+    warnings.push({
+      type: "rawtext_partial",
+      message: `rawText 含 ${missingCount} 个 "未找到" 关键词, skill turn 部分数据未查到`,
+    });
+  }
+
+  return { ok, issues, warnings };
 }
 
 main().catch((e) => {
