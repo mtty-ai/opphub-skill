@@ -1,14 +1,20 @@
 #!/usr/bin/env node
-// bin/opphub-configure.js · v3.1.0-alpha.1
+// bin/opphub-configure.js · v4.0.0-alpha.1
 //
 // 舟哥 12:42 钉: plugin 端 opphub configure 功能可放 skill 里, 或 2 个都有
 // 舟哥 12:47 钉: configure 完必须引导装 plugin
 // 舟哥 13:28 钉: skill 不拼飞书 card, 走 OpenClaw runtime 渲染层
 // 舟哥 13:41 钉: 只到 skill 开放完, 不动 server schema / runtime renderer
 //
+// v4.0.0-alpha.1 P0-5: 通道 v4 改造 (实测已符合, 无代码改动)
+//   - 通道清单 = OpenClaw runtime 真源, 走 `openclaw channels list --json` (不经 plugin)
+//   - 默认通道真源 = opphub-server, PATCH /api/user/channels/default 直连 server (不经 plugin)
+//   - 旧版: 调 `openclaw opphub channels` 走 plugin CLI, plugin 进程不在就拿不到
+//   - 现版: 调 `openclaw channels list --json` 走 runtime, plugin 缺也能跑
+//
 // 用法: bot 调
 //   opphub configure list --json
-//     → 返 { ok, channels: [{type, account, valid, reportedAs, reason?}], skipped }
+//     → 返 { ok, channels: [{type, account, valid, reportedAs, reason?}], skipped, default_channel }
 //   opphub configure set --channel-type feishu --channel-id pm --json
 //     → PATCH /api/user/channels/default (用户 JWT, 不传 peer)
 //
