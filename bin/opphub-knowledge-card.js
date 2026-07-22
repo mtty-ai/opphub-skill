@@ -285,6 +285,11 @@ async function main() {
   // 行业撞分 / 证据弱 → 不准拆卡, C2 修复: 返 askInteractive (不 process.exit)
   //   - ambiguous: topTwo 两个选项 + askUser=true, bot 走 bot.skillApi.askInteractive 让舟哥拍
   //   - weak:      topOne = unknown, 仅跳问 "是哪类?", 给 5 个选项 (mcn/saas/law/mfg/unknown) 让舟哥拍
+  //
+  // v4.0.0-alpha.1 P0-4: 歧义分支输出后立即 return, 不再继续 generateCards
+  //   之前漏 return → INDUSTRY_TEMPLATES[industryCode='ambiguous'] fallback 到 'unknown'
+  //   → 继续 generateCards → stdout 出 2 份 JSON (一份 ambiguity, 一份空 cards)
+  //   → bot 拿 JSON.parse(stdout) 失败
   if (industryCode === "ambiguous" || industryState === "weak") {
     // 拼 askInteractive options (industry_ambiguous 时是 topTwo; industry_weak 时是 5 个可选项)
     const options = [];
@@ -330,7 +335,8 @@ async function main() {
       console.log(`🚫 ${name}: 行业无法可靠推断, 不准按模板拆 (返 askInteractive 让舟哥拍)`);
       console.log(JSON.stringify(result, null, 2));
     }
-    // 不 process.exit (C2 修复): 让 bot 拿 options/nextStep 走 askInteractive 重跑流程
+    // v4.0.0-alpha.1 P0-4: 立即 return, 不再继续 generateCards 产生第 2 份 JSON
+    return;
   }
 
   const template = INDUSTRY_TEMPLATES[industryCode] || INDUSTRY_TEMPLATES.unknown;
