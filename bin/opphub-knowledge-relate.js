@@ -2,7 +2,7 @@
 // bin/opphub-knowledge-relate.js · v3.2.0-alpha.2
 // status: implemented (v4 P1-5 列校验 + 金额解析增强 + 二进制 XLS 检测)
 //
-// 舟哥 7/20 12:55 拍: 录入关联公司 (上游供应商 / 下游客户)
+// 维护者 7/20 12:55 拍: 录入关联公司 (上游供应商 / 下游客户)
 //   输入: xls 合同清单 (HTML 格式导出, 跟 Excel 兼容)
 //   输出: cards[] 数组 (skill 6 阶段流程第 5 步可批量入库)
 //
@@ -28,7 +28,7 @@
 // 不做的事:
 //   - 不调 LLM (skill turn 的活, 不在本 bin)
 //   - 不入库 (阶段 5 才入库)
-//   - 不查 OPC 元数据 / 本机 plugin state (舟哥 12:35 拍"不用了")
+//   - 不查 OPC 元数据 / 本机 plugin state (维护者 12:35 拍"不用了")
 
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -277,7 +277,7 @@ function aggregateCards(parsedData, company, options) {
         type: "downstream_category",
         dimension: "客户类别/未分类",
         emoji: "📂",
-        text: `${company} · 下游客户类别 · 未分类 (D1: 未撞中任何关键词的公司, top ${otherCompanies.length})\n\n关联客户数: ${otherDs.count} 家\n合同总金额: ¥${otherDs.total.toLocaleString("en-US", { maximumFractionDigits: 0 })}\n代表客户: ${otherCompanies.map(([n]) => n).join(", ")}\n\n(D1 补: 不准 "掉 other 里", 未撞中关键词的公司独立汇总, 舟哥可手工拍补类目)`,
+        text: `${company} · 下游客户类别 · 未分类 (D1: 未撞中任何关键词的公司, top ${otherCompanies.length})\n\n关联客户数: ${otherDs.count} 家\n合同总金额: ¥${otherDs.total.toLocaleString("en-US", { maximumFractionDigits: 0 })}\n代表客户: ${otherCompanies.map(([n]) => n).join(", ")}\n\n(D1 补: 不准 "掉 other 里", 未撞中关键词的公司独立汇总, 维护者可手工拍补类目)`,
       });
     }
   }
@@ -292,7 +292,7 @@ function aggregateCards(parsedData, company, options) {
         type: "upstream_category",
         dimension: "供应商类别/未分类",
         emoji: "📂",
-        text: `${company} · 上游供应商类别 · 未分类 (D1: 未撞中任何关键词的公司, top ${otherCompanies.length})\n\n关联供应商数: ${otherUs.count} 家\n合同总金额: ¥${otherUs.total.toLocaleString("en-US", { maximumFractionDigits: 0 })}\n代表供应商: ${otherCompanies.map(([n]) => n).join(", ")}\n\n(D1 补: 不准 "掉 other 里", 未撞中关键词的公司独立汇总, 舟哥可手工拍补类目)`,
+        text: `${company} · 上游供应商类别 · 未分类 (D1: 未撞中任何关键词的公司, top ${otherCompanies.length})\n\n关联供应商数: ${otherUs.count} 家\n合同总金额: ¥${otherUs.total.toLocaleString("en-US", { maximumFractionDigits: 0 })}\n代表供应商: ${otherCompanies.map(([n]) => n).join(", ")}\n\n(D1 补: 不准 "掉 other 里", 未撞中关键词的公司独立汇总, 维护者可手工拍补类目)`,
       });
     }
   }

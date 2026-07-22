@@ -41,7 +41,7 @@ process.exit(0);
 
 
 async function readToken() {
-  // v3.1.0-alpha.3 (舟哥 14:20 红纸船): 走 plugin client proxy
+  // v3.1.0-alpha.3 (维护者 14:20 红纸船): 走 plugin client proxy
   try {
     return await pluginReadToken();
   } catch {

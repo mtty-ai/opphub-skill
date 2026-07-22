@@ -2,7 +2,7 @@
 # bin/opphub · v4.0.0
 # 统一入口, 把 bot 调用转发到对应 bin/*.js
 #
-# v4.0.0 (舟哥 2026-07-22 拍板):
+# v4.0.0 (维护者 2026-07-22 拍板):
 #   - 通道 v4: 通道清单走 runtime, 默认通道走 server PATCH, 不经 plugin
 #   - cron v3: cron 写改 trigger plugin (peer 由 plugin 维护)
 #   - 注册不归 skill (引导去偶合 App 或 web /activate)
@@ -40,7 +40,7 @@ case "$CMD" in
     exec node "$SKILL_DIR/bin/opphub-cron-setup.js" status "$@"
     ;;
 
-  # === v3.1.0-alpha.3 (舟哥 14:21 拍 "代码都得改") ===
+  # === v3.1.0-alpha.3 (维护者 14:21 拍 "代码都得改") ===
   # 改: skill 不再自实现 refresh (11845 bytes bin/opphub-token-refresh.js 是 dup),
   # 改 import plugin dist/oauth-client.js (plugin = source of truth)
   # 入口加 token-refresh 子命令直接挂 plugin client.getAccessToken (needs_refresh 自动续)
@@ -54,7 +54,7 @@ case "$CMD" in
 
   # === v3.1 新加 ===
   login-start)
-    # 舟哥 12:44 钉: chat 版 login 2 步走
+    # 维护者 12:44 钉: chat 版 login 2 步走
     # 拆 start (拿 device_code + user_code + verification_url)
     exec node "$SKILL_DIR/bin/opphub-oauth-login.js" start "$@"
     ;;
@@ -64,31 +64,31 @@ case "$CMD" in
     ;;
 
   configure)
-    # 舟哥 12:42/12:47 钉: configure 完必须引导装 plugin
+    # 维护者 12:42/12:47 钉: configure 完必须引导装 plugin
     SUBCMD="${1:-list}"
     shift || true
     exec node "$SKILL_DIR/bin/opphub-configure.js" "$SUBCMD" "$@"
     ;;
 
   plugin-check)
-    # 舟哥 12:47 钉: 不引导装 plugin = 配置是空的
+    # 维护者 12:47 钉: 不引导装 plugin = 配置是空的
     # 读 ~/.openclaw/extensions/opphub/package.json
     exec node "$SKILL_DIR/bin/opphub-plugin-check.js" "$@"
     ;;
 
   knowledge-status)
-    # 舟哥 12:58 钉: 能力卡片改造 → 开放式知识库
+    # 维护者 12:58 钉: 能力卡片改造 → 开放式知识库
     # GET /api/knowledge
     exec node "$SKILL_DIR/bin/opphub-knowledge-status.js" "$@"
     ;;
 
   knowledge-add)
-    # 舟哥 12:58 钉: POST /api/knowledge/ingest
+    # 维护者 12:58 钉: POST /api/knowledge/ingest
     # 支持 --raw-text / --file / --url + --source-type
     exec node "$SKILL_DIR/bin/opphub-knowledge-add.js" "$@"
     ;;
 
-  # === v3.2.0-alpha.1 (舟哥 7/20 12:31 拍: 录入公司流程 阶段 1) ===
+  # === v3.2.0-alpha.1 (维护者 7/20 12:31 拍: 录入公司流程 阶段 1) ===
   # 阶段 1: 生成 queryPlan (skill turn 据此调 web_search/web_fetch/memory/wiki 填 rawText)
   # 阶段 2: 接收 skill turn 拼好的 rawText 验证 + 透传
   knowledge-discover)
@@ -97,21 +97,21 @@ case "$CMD" in
     exec node "$SKILL_DIR/bin/opphub-knowledge-discover.js" "$@"
     ;;
 
-  # === v3.2.0-alpha.2 (舟哥 7/20 12:46 拍: 录入公司流程 阶段 2-3) ===
+  # === v3.2.0-alpha.2 (维护者 7/20 12:46 拍: 录入公司流程 阶段 2-3) ===
   knowledge-card)
     # bot 调: opphub knowledge-card --name "公司名" --raw-text "<阶段 1 返的>" --json
     # 按行业模板拆 4 类卡 (ability/industry/upstream/downstream/peer)
     exec node "$SKILL_DIR/bin/opphub-knowledge-card.js" "$@"
     ;;
 
-  # === v3.2.0-alpha.2 (舟哥 7/20 12:46 拍: 录入公司流程 阶段 5) ===
+  # === v3.2.0-alpha.2 (维护者 7/20 12:46 拍: 录入公司流程 阶段 5) ===
   knowledge-ingest-batch)
     # bot 调: opphub knowledge-ingest-batch --cards <cards.json> --json
     # 批量入库 (循环调 knowledge-add)
     exec node "$SKILL_DIR/bin/opphub-knowledge-ingest-batch.js" "$@"
     ;;
 
-  # === v3.2.0-alpha.2 (舟哥 7/20 12:47 拍: 录入公司流程 阶段 6) ===
+  # === v3.2.0-alpha.2 (维护者 7/20 12:47 拍: 录入公司流程 阶段 6) ===
   knowledge-match)
     # bot 调: opphub knowledge-match --name "公司名" --entry-ids <ids.json> --json
     # 上下游 + 同业 关联匹配 (查 opphub 知识库已有 OPC)
@@ -132,7 +132,7 @@ case "$CMD" in
     exec node "$SKILL_DIR/bin/opphub-knowledge-relate.js" "$@"
     ;;
 
-  # === v3.3.0 (舟哥 7/20 17:30 拍: skill/server 职责重划) ===
+  # === v3.3.0 (维护者 7/20 17:30 拍: skill/server 职责重划) ===
   # idempotent ingest + 冲突检测 + 软链覆盖 (取代 v3.2 的 ingest-batch 循环调 add)
   # server 端 4 种响应: created / no_change / soft_chain_override / conflict
   knowledge-submit)

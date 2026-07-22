@@ -36,7 +36,7 @@ bot: ✅ 注册成功 · opc_id = opc_xxx
 
 ## 注意事项
 
-- **验证码不在公开对话框贴**（chinabot 12:04 误贴 567425 教训）
+- **验证码不在公开对话框贴**（runtime 12:04 误贴 567425 教训）
 - 5 分钟 1 次冷却（dedup = 还在有效期内不重发；rate_limit = IP 冲击 5 次/分钟）
 - 邮箱/手机已注册 → server 返 `CONFLICT`，bot 引导直接走 "偶合登录"（不重复注册）
 - bot 调 `/api/auth/register` 拿到的 `opphubToken` 是 30 天 JWT（带 `opphub:profile:rw` scope），

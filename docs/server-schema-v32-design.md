@@ -1,8 +1,8 @@
 # server schema v3.2 设计 · idempotent ingest
 
-> **设计稿，待 opphub-web 团队接 + 舟哥拍 schema 部署**
+> **设计稿，待 opphub-web 团队接 + 维护者拍 schema 部署**
 >
-> 拍板人：舟哥 (Feishu DM 17:30)
+> 拍板人：维护者 (Feishu DM 17:30)
 > 拍板原话: "skill 只负责数据收集, 数据的处理, 应该是服务器端来负责"
 > 关联 workboard: `v3.3-skill-server-separation-2026-07-20` (id=bc34d33f-...)
 >
@@ -11,25 +11,25 @@
 
 ---
 
-## 一、问题 (舟哥 7/20 17:23 拍出)
+## 一、问题 (维护者 7/20 17:23 拍出)
 
 7/20 17:23 我走"睿驰嘉禾"录入闭环，撞 3 个真问题：
 
 1. **无去重**：server `OpcKnowledgeEntry.create()` 直接 create，0 个 unique constraint（除 entry.id 主键）
    - 同 OPC 同 rawText 提交 2 次 → 2 条 entry
-   - 71 → 82 那次 ingest 走完，**没告诉舟哥是否真有 11 条新内容 vs 重复**
+   - 71 → 82 那次 ingest 走完，**没告诉维护者是否真有 11 条新内容 vs 重复**
 
 2. **无幂等键**：改一个错别字只能新建 entry，原 entry 还在
    - 没 `idempotencyKey` 概念
    - 没 `contentHash` 概念
 
 3. **无冲突检测**：录入有矛盾字段时静默入库
-   - 舟哥说"老板=刘会冬"，库里如果已有"老板=张老板"，**谁说了算？没设计**
+   - 维护者说"维护者=刘会冬"，库里如果已有"维护者=张维护者"，**谁说了算？没设计**
    - 没版本管理 / source 优先级 / 时间戳覆盖策略
 
 ---
 
-## 二、设计原则 (舟哥 7/20 17:30 拍)
+## 二、设计原则 (维护者 7/20 17:30 拍)
 
 - **P1**: skill = 采集者 + 翻译者，只产 rawText。**不做任何去重 / 冲突判断 / 版本管理**
 - **P2**: server = 仓库 + 处理器，做去重 / 冲突检测 / 版本管理 / 蒸馏 / 嵌入 / 召回
@@ -61,7 +61,7 @@ model OpcKnowledgeEntry {
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
-  // === v3.2 新加 (舟哥 17:30 拍) ===
+  // === v3.2 新加 (维护者 17:30 拍) ===
   
   // idempotencyKey: SHA256(opcId + entryType + entryDimension)
   //   - 同 OPC 同 type+dimension → 同 key → server 走 upsert 路径
@@ -97,7 +97,7 @@ model OpcKnowledgeEntry {
 
 ### 3.2 字段边界 (跟 7/20 12:58 精神的协调)
 
-舟哥 7/20 12:58 拍: "改成开放式的, 整个录入的信息是存到知识库里, 也就是向量存储, 这样就不拘泥于字段"
+维护者 7/20 12:58 拍: "改成开放式的, 整个录入的信息是存到知识库里, 也就是向量存储, 这样就不拘泥于字段"
 
 **v3.2 加的字段**:
 | 字段 | 是否破坏"开放式" |
@@ -152,9 +152,9 @@ model OpcKnowledgeEntry {
   "conflict": true, 
   "conflictReport": {
     "entryId": "cmxxx",                  // 已有 entry
-    "oldRawText": "...刘会冬是老板...",
-    "newRawText": "...张老板是老板...",
-    "conflictFields": ["legal_person: 刘会冬 → 张老板"],
+    "oldRawText": "...刘会冬是维护者...",
+    "newRawText": "...张维护者是维护者...",
+    "conflictFields": ["legal_person: 刘会冬 → 张维护者"],
     "diffType": "key_field_conflict"     // vs "incremental_addition"
   }
 }
@@ -265,11 +265,11 @@ function diffRawText(oldText: string, newText: string) {
 function extractKeyFields(rawText: string) {
   const fields: Record<string, string> = {};
   
-  // 法人 / 老板
+  // 法人 / 维护者
   const legalPersonMatch = rawText.match(/法[定]?人[::]?\s*([^\s,，;；\n]+)/);
   if (legalPersonMatch) fields.legal_person = legalPersonMatch[1];
   
-  const bossMatch = rawText.match(/老板[::]?\s*([^\s,，;；\n]+)/);
+  const bossMatch = rawText.match(/维护者[::]?\s*([^\s,，;；\n]+)/);
   if (bossMatch) fields.legal_person = bossMatch[1];
   
   // 注册资本
@@ -310,7 +310,7 @@ const entries = await prisma.opcKnowledgeEntry.findMany({
 #!/usr/bin/env node
 // bin/opphub-knowledge-submit.js · v3.3.0
 // 
-// 舟哥 7/20 17:30 拍: skill 只产 rawText, 不做去重 / 冲突判断
+// 维护者 7/20 17:30 拍: skill 只产 rawText, 不做去重 / 冲突判断
 // 本 bin 纯转发 + 透传 server 响应
 //
 // 输入: cards.json (knowledge-card 输出)
@@ -461,12 +461,12 @@ server: 跳过冲突检测, 强制 soft_chain_override
 
 ## 七、部署 & 测试
 
-### 7.1 部署顺序 (舟哥 7/15 红线)
+### 7.1 部署顺序 (维护者 7/15 红线)
 
 1. ✅ **本地 dev migrate** (不部署 ECS)
 2. ✅ server 端 schema 改造 + 接口实现 (本地 dev server)
 3. ✅ skill 端 submit + ingest-batch 改造 (本地开发)
-4. ⏸️ **等舟哥拍 deploy** → 才动 ECS schema + ECS code
+4. ⏸️ **等维护者拍 deploy** → 才动 ECS schema + ECS code
 
 ### 7.2 本地 E2E 测试 (mock server)
 
@@ -495,7 +495,7 @@ OPPHUB_API_BASE=http://localhost:4001 bin/opphub knowledge-submit --cards /tmp/c
 
 ## 八、不动的事 (反复钉的纪律)
 
-- ❌ 不动 ECS schema deploy (7/15 钉: 本地 dev migrate, 等舟哥拍才 deploy)
+- ❌ 不动 ECS schema deploy (7/15 钉: 本地 dev migrate, 等维护者拍才 deploy)
 - ❌ skill 端不做去重 / 冲突判断 (17:30 钉的职责)
 - ❌ 不动 server OpcProfile / OpcSkillCard (7/20 12:58 拍: 弱化)
 - ❌ 不动 OpenClaw runtime 渲染层 (7/17 13:41 钉)
@@ -516,9 +516,9 @@ OPPHUB_API_BASE=http://localhost:4001 bin/opphub knowledge-submit --cards /tmp/c
 
 ## 十、下次同样场景
 
-- 舟哥问"录入为什么重复" → 查 idempotencyKey 设计 + workboard 卡
-- 舟哥拍"加去重" → 按 §3 schema 改造 + §4 接口实现
-- 舟哥拍"加冲突检测" → 按 §4.3 diffRawText 算法
-- 舟哥拍"开干 skill 端" → 写 `bin/opphub-knowledge-submit.js` + 改 ingest-batch
-- 舟哥拍"开干 server 端" → 不归 skill, 转给 opphub-web 团队 + 拍 schema 部署
+- 维护者问"录入为什么重复" → 查 idempotencyKey 设计 + workboard 卡
+- 维护者拍"加去重" → 按 §3 schema 改造 + §4 接口实现
+- 维护者拍"加冲突检测" → 按 §4.3 diffRawText 算法
+- 维护者拍"开干 skill 端" → 写 `bin/opphub-knowledge-submit.js` + 改 ingest-batch
+- 维护者拍"开干 server 端" → 不归 skill, 转给 opphub-web 团队 + 拍 schema 部署
 - **不要** 凭记忆瞎拍 → 先 `wiki_search` 查 v3.3 + `memory_recall` 查 7/20 17:30

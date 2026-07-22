@@ -2,7 +2,7 @@
 // bin/opphub-knowledge-discover.js · v3.2.0-alpha.1
 // status: implemented (v4 P1-4 --name 强校验)
 //
-// 舟哥 7/20 12:31 拍 v3.1 引导流程 阶段 1
+// 维护者 7/20 12:31 拍 v3.1 引导流程 阶段 1
 //   bot 全自动查工商/业务/招聘/项目/memory/wiki
 //   输出 rawText (供阶段 2 拆卡用)
 //
@@ -13,7 +13,7 @@
 // 实现注意:
 //   - 本 bin 是 wrapper, 真"查"在 OpenClaw skill turn 里调 web_search/web_fetch/memory_search/wiki_search
 //   - 本 bin 把 rawText 拼成结构化字符串, 阶段 2 拆卡读这个
-//   - LLM 工具调用在 skill turn 里发生 (舟哥 13:15 钉), 本 bin 只生成 rawText 模板 + 占位
+//   - LLM 工具调用在 skill turn 里发生 (维护者 13:15 钉), 本 bin 只生成 rawText 模板 + 占位
 //
 // skill turn 流程:
 //   1. bot 调 web_search "<公司名> 工商 业务" 拿工商信息
@@ -32,7 +32,7 @@
 // 不做的事:
 //   - 不真调 LLM/web (那是 skill turn 的活)
 //   - 不入库 (阶段 5 才入库)
-//   - 不查本机 plugin state / IM 通道 / token (舟哥 12:35 拍)
+//   - 不查本机 plugin state / IM 通道 / token (维护者 12:35 拍)
 
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -108,8 +108,8 @@ async function main() {
 
   // raw-text 透传模式 (必须 --name + --raw-text 同时存在)
   if (args.rawText) {
-    // 舟哥 7/20 13:00 拍: rawText 接收时必须验证 (防止拼错公司名 / 查不到数据)
-    // 舟哥 7/20 13:03 拍: 加拼写纠错 (web_results 传 web_search 返的 JSON 或文件路径)
+    // 维护者 7/20 13:00 拍: rawText 接收时必须验证 (防止拼错公司名 / 查不到数据)
+    // 维护者 7/20 13:03 拍: 加拼写纠错 (web_results 传 web_search 返的 JSON 或文件路径)
     let webResults = null;
     if (args.webResults) {
       try {
@@ -165,7 +165,7 @@ async function main() {
         for (const s of validation.suggestions) {
           console.log(`  📌 ${s.name} (相似度 ${(s.similarity * 100).toFixed(0)}%)`);
         }
-        console.log(`\n下一步: 问舟哥确认候选名 / 重输, 然后 --name <correct> --raw-text <newRawText> 重跑`);
+        console.log(`\n下一步: 问维护者确认候选名 / 重输, 然后 --name <correct> --raw-text <newRawText> 重跑`);
       }
     }
     if (!validation.ok) process.exit(1);
@@ -198,8 +198,8 @@ async function main() {
 }
 
 // raw-text 模式增加: 公司名验证 + rawText 完整性检查 + 拼写纠错候选
-// 舟哥 7/20 13:00 拍: 两个都加 (双保险)
-// 舟哥 7/20 13:03 拍: 加拼写纠错 (用 web_search 返 top 3 相似公司名候选)
+// 维护者 7/20 13:00 拍: 两个都加 (双保险)
+// 维护者 7/20 13:03 拍: 加拼写纠错 (用 web_search 返 top 3 相似公司名候选)
 function validateRawText(name, rawText, webResults) {
   const issues = [];
   const warnings = [];
@@ -242,7 +242,7 @@ function validateRawText(name, rawText, webResults) {
     });
   }
 
-  // 3. 拼写纠错 (舟哥 7/20 13:03 拍): 用 web_results 找 top 3 相似公司名候选
+  // 3. 拼写纠错 (维护者 7/20 13:03 拍): 用 web_results 找 top 3 相似公司名候选
   let suggestions = [];
   if (!ok && webResults && Array.isArray(webResults)) {
     suggestions = suggestCorrections(name, webResults);
@@ -284,7 +284,7 @@ function similarity(a, b) {
   return 1 - dist / maxLen;
 }
 
-// 从 web_results 找相似公司名 (舟哥 7/20 13:03 拍)
+// 从 web_results 找相似公司名 (维护者 7/20 13:03 拍)
 // webResults: bot web_search 返回的 [{title, link, snippet}, ...]
 // 提取 title/snippet 里的公司名 (正则: Xxx公司 / Xxx有限公司 / Xxx集团 / Xxx工作室)
 function suggestCorrections(name, webResults) {

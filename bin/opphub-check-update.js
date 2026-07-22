@@ -4,10 +4,10 @@
 //
 // 用途: 检查 skill 自身是否有新版本 (供 plugin 调用)
 // alpha.5 占位, alpha.6 实跑 clawhub inspect
-// alpha.6.1.5 (老板 12:46 拍): cron 不在这里, plugin 接管 cron 维护
+// alpha.6.1.5 (维护者 12:46 拍): cron 不在这里, plugin 接管 cron 维护
 //   - 本输出 不直接 console.log 推 IM (plugin 负责)
 //   - 返回 JSON 结构 ({ ok, status, local, remote, commits, ... }) 供 plugin 渲染后 推 IM
-//   - 老板 7/06 10:40 拍: 错误一律静默, 不打扰用户
+//   - 维护者 7/06 10:40 拍: 错误一律静默, 不打扰用户
 
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
@@ -17,7 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 const execp = promisify(exec);
 const __skillDir = dirname(fileURLToPath(import.meta.url));
 
-// alpha.6.1.5 (老板 12:46): cron 不在这里, plugin 接管
+// alpha.6.1.5 (维护者 12:46): cron 不在这里, plugin 接管
 //   - 默认 mode=json: 返回 JSON 给 plugin 拿去渲染 + 推 IM
 //   - mode=notify: 老 cron 路径保留 (可以兼容), console.log 一行
 function out(obj, mode = "json") {
@@ -75,7 +75,7 @@ async function getLocalVersion() {
 }
 
 async function getRemoteVersion() {
-  // 优先级: 1) GitHub release tag (老板发版才有)  2) latest commit 的 _meta.json version
+  // 优先级: 1) GitHub release tag (维护者发版才有)  2) latest commit 的 _meta.json version
   try {
     const { stdout } = await execp(
       "gh release view --repo mtty-ai/opphub-skill --json tagName -q .tagName 2>/dev/null"
@@ -83,7 +83,7 @@ async function getRemoteVersion() {
     const v = stdout.trim().replace(/^v/, "");
     if (v) return v;
   } catch {}
-  // fallback: 拉 main 分支 _meta.json (老板没发版也能查到)
+  // fallback: 拉 main 分支 _meta.json (维护者没发版也能查到)
   try {
     const { stdout } = await execp(
       "gh api repos/mtty-ai/opphub-skill/contents/_meta.json --jq .content 2>/dev/null"
@@ -97,7 +97,7 @@ async function getRemoteVersion() {
 }
 
 function compareSemver(a, b) {
-  // alpha.6.1.2 简化 (老板 12:12 拍): cron 不关心 duex细节, 直接比含预发布字符串
+  // alpha.6.1.2 简化 (维护者 12:12 拍): cron 不关心 duex细节, 直接比含预发布字符串
   // - "3.0.0-alpha.3" < "3.0.0-alpha.5" → -1
   // - 退 alpha.5.1 拿 老 cron 后发生过 后台静默 拼错位置,这里改最简
   // 用 字符串数组比, 只要 主.次.补丁 都同名, 就 localeCompare 预发布部分
@@ -118,7 +118,7 @@ function compareSemver(a, b) {
 }
 
 async function main() {
-  // alpha.6.1.5 (老板 12:46): plugin 接管 cron 维护
+  // alpha.6.1.5 (维护者 12:46): plugin 接管 cron 维护
   //   cli 用法: `node opphub-check-update.js [--mode=notify|json]` [--kind=skill|plugin]
   //   --mode=notify (旧, cron 场景)  --mode=json (默认, plugin 场景)
   //   --kind=skill 查 skill, --kind=plugin 查 plugin (拿 不同仓的 SKILL.md / openclaw.plugin.json)

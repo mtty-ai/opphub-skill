@@ -1,9 +1,9 @@
 # opphub-skill v3.1 · OpenClaw runtime · channel-renderer 渲染层架构
 
-> **舟哥 2026-07-17 13:28 拍板**:
+> **维护者 2026-07-17 13:28 拍板**:
 > "原始内容归原始内容, 你得 写一个 飞书 card 的渲染层 当然未来也有其他通道需要特定的渲染"
 
-> **2026-07-17 13:41 舟哥钉**: 只到 skill 开放完, 没开发完, 不会会话
+> **2026-07-17 13:41 维护者钉**: 只到 skill 开放完, 没开发完, 不会会话
 > **含义**: runtime 渲染层是 OpenClaw 平台活, **不在 opphub skill v3.1 范围**
 > **本文状态**: 独立存档, 等 OpenClaw runtime 团队接
 
@@ -19,11 +19,11 @@
 
 ---
 
-## 1. 拍板原话 (舟哥 13:28)
+## 1. 拍板原话 (维护者 13:28)
 
 > "原始内容归原始内容, 你得 写一个 飞书 card 的渲染层 当然未来也有其他通道需要特定的渲染"
 
-## 2. 舟哥 13:41 后续钉
+## 2. 维护者 13:41 后续钉
 
 > "只到 skill 开放完, 没开发完, 不会会话"
 
@@ -35,7 +35,7 @@
 
 ---
 
-### 9.1 channel-renderer 子任务 (v3.1 新加 · 舟哥 13:28 钉)
+### 9.1 channel-renderer 子任务 (v3.1 新加 · 维护者 13:28 钉)
 
 | # | 任务 | 改动层 | 工时 | 依赖 |
 |---|---|---|---|---|
@@ -50,7 +50,7 @@
 
 ---
 
-## 13. OpenClaw runtime · 渲染层架构 (舟哥 13:28 钉 · v3.1 必备)
+## 13. OpenClaw runtime · 渲染层架构 (维护者 13:28 钉 · v3.1 必备)
 
 > **拍板原话 (13:28)**: "原始内容归原始内容, 你得 写一个 飞书 card 的渲染层 当然未来也有其他通道需要特定的渲染"
 
@@ -164,7 +164,7 @@ declare global {
 | OpenClaw runtime ★ | 把 IntentMessage 转译成 channel 原生渲染 | 不解析业务意图 |
 | Channel | 飞书 OpenAPI / 微信 iLink / Slack / Discord / Telegram / tty / web | — |
 
-### Skill 关键纪律 (舟哥 13:28 钉)
+### Skill 关键纪律 (维护者 13:28 钉)
 
 - ✅ skill 必须调 `bot.skillApi.askInteractive(...)` / `askFreeText(...)` / `send(...)`
 - ❌ skill **永远不写** 硬编码 飞书 card JSON (不是 skill 的活)

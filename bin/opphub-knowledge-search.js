@@ -2,8 +2,8 @@
 // bin/opphub-knowledge-search.js · v3.1.0-alpha.1
 // status: implemented (向量召回, v3.1)
 //
-// 舟哥 7/17 16:31 拍 Q5=A: similarity + 全文独立 endpoint
-// 舟哥 7/20 12:12 拍: server 加 minScore 阈值过滤 (防 nomic-embed-text 短 query 幻觉)
+// 维护者 7/17 16:31 拍 Q5=A: similarity + 全文独立 endpoint
+// 维护者 7/20 12:12 拍: server 加 minScore 阈值过滤 (防 nomic-embed-text 短 query 幻觉)
 //
 // 用法: bot 调
 //   opphub knowledge-search --q "公司主营业务" --json
@@ -20,7 +20,7 @@ import { getAccessToken as pluginGetAccessToken } from "../lib/opphub-plugin-cli
 const API_BASE = process.env.OPPHUB_API_BASE || "https://api.opphub.ruiplus.cn";
 
 async function getAccessToken() {
-  // v3.1.0-alpha.3 (舟哥 14:20 红纸船): 走 plugin client proxy, 自动 refresh
+  // v3.1.0-alpha.3 (维护者 14:20 红纸船): 走 plugin client proxy, 自动 refresh
   try {
     const accessToken = await pluginGetAccessToken();
     return accessToken ? { access_token: accessToken } : null;

@@ -2,7 +2,7 @@
 // bin/opphub-knowledge-ingest-batch.js · v4.0.0
 // status: implemented (v4 P1-3 mkdtemp + cleanup, 避免并发竞态)
 //
-// 舟哥 7/20 17:30 拍: "skill 只负责数据收集, 数据的处理, 应该是服务器端来负责"
+// 维护者 7/20 17:30 拍: "skill 只负责数据收集, 数据的处理, 应该是服务器端来负责"
 //
 // v3.3.0 改动: 不再循环调 knowledge-add (v3.2 旧姿势)
 //   改成: 调 opphub-knowledge-submit (v3.3 新姿势, idempotent + 冲突检测)
@@ -23,12 +23,12 @@
 // 输入 cards.json 格式 (knowledge-card 的输出):
 //   { "cards": [{ "type": "ability", "dimension": "达人营销", "emoji": "✅", "text": "..." }, ...] }
 //
-// 不做的事 (舟哥 17:30 钉的纪律):
+// 不做的事 (维护者 17:30 钉的纪律):
 //   - 不做去重 (submit bin + server 端做)
 //   - 不做冲突判断 (server 端做)
 //   - 不做版本管理 (server 端做)
 //   - 不调 LLM (skill turn 的活)
-//   - 不入库 OPC 元数据 / 通道列表 / token (舟哥 12:35 拍)
+//   - 不入库 OPC 元数据 / 通道列表 / token (维护者 12:35 拍)
 
 import { readFileSync, existsSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -239,7 +239,7 @@ async function main() {
       console.log(`🔁 幂等命中 ${result.summary.deduplicated} 条 (已存在, 跳过)`);
     }
     if (result.summary.conflicts > 0) {
-      console.log(`⚠️ 冲突 ${result.summary.conflicts} 条 (要舟哥拍):`);
+      console.log(`⚠️ 冲突 ${result.summary.conflicts} 条 (要维护者拍):`);
       for (const c of result.conflicts) {
         const cf = c.conflictReport?.conflictFields?.join(", ") || c.conflictReport?.message || "?";
         console.log(`  card ${c.cardIndex} [${c.type}/${c.dimension}]: ${cf}`);

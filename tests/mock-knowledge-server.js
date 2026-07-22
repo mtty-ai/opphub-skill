@@ -37,14 +37,14 @@ function diffRawText(oldText, newText) {
 
 function extractKeyFields(text) {
   const fields = {};
-  // 法人/老板: 只取第一个 \n 之前的部分
+  // 法人/维护者: 只取第一个 \n 之前的部分
   const lp = text.match(/法[定]?人[::]?\s*([^\n]+)/);
   if (lp) {
     // 只取法人名, 不包括后续内容
     const m = lp[1].match(/^([^\s,，;；]+)/);
     if (m) fields.legal_person = m[1];
   }
-  const boss = text.match(/老板[::]?\s*([^\n]+)/);
+  const boss = text.match(/维护者[::]?\s*([^\n]+)/);
   if (boss) {
     const m = boss[1].match(/^([^\s,，;；]+)/);
     if (m) fields.legal_person = m[1];

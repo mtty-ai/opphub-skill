@@ -2,7 +2,7 @@
 // bin/opphub-knowledge-match.js · v3.2.0-alpha.2
 // status: implemented (关联匹配, v3.2)
 //
-// 舟哥 7/20 12:31 拍 v3.1 引导流程 阶段 6
+// 维护者 7/20 12:31 拍 v3.1 引导流程 阶段 6
 //   入库完跑 1 次撮合匹配 (上下游 + 同业)
 //   用 opphub-knowledge-search 拉 opphub 里其他 OPC 的条目
 //
@@ -12,7 +12,7 @@
 //   opphub knowledge-match --based-on-cards /tmp/cards.json --entry-ids /tmp/ids.json --json (组合)
 // 返 { ok, name, inputMode, queryPlan, upstream: [...], downstream: [...], peer: [...], insufficient, summary }
 //
-// v3.2-alpha.2 修复 (舟哥 21:28 拍: "修复所有的bug"):
+// v3.2-alpha.2 修复 (维护者 21:28 拍: "修复所有的bug"):
 //   - A1: ingest-batch v3.2 (`ingested`) / v3.3 (`submitted` / `deduplicated`) 字段名兼容
 //   - A5: 新加 --based-on-cards, 从 cards.json 反推 query (取代硬编码关键词)
 //   - B1: 去硬编码 UPSTREAM_QUERIES/DOWNSTREAM_QUERIES/PEER_QUERIES (v3.2 写死, 不准录 SaaS/律所)
@@ -262,7 +262,7 @@ async function main() {
     }
   }
 
-  // 检测知识库容量 (舟哥 12:32 拍: < 5 个 OPC 用户提示不足 → 跟 SKILL.md 阶段 6 例子对齐)
+  // 检测知识库容量 (维护者 12:32 拍: < 5 个 OPC 用户提示不足 → 跟 SKILL.md 阶段 6 例子对齐)
   // 启发式: 召回结果去重 entryId, 不同 entry 数 < 5 视为不足
   // 精确判断需 server 端 API 查 opc 总数, v3.3 schema 红线 (等 server 接)
   const allHits = [

@@ -1,6 +1,6 @@
 # Changelog
 
-## v3.1.0-alpha.1 (2026-07-17 · 舟哥 12:40-13:41 拍板)
+## v3.1.0-alpha.1 (2026-07-17 · 维护者 12:40-13:41 拍板)
 
 ### 加 (New)
 
@@ -15,7 +15,7 @@
 
 - **`SKILL.md` frontmatter** — version 3.0.0-alpha.6 → 3.1.0-alpha.1, 加 `requires.tools` 9 个 (LLM/联网/memory/wiki), 加 `metadata.channelRenderer` 4 个 (bot.skillApi 引用)
 - **`bin/opphub`** — 加 7 个新子命令 (`login-start` / `login-poll` / `configure` / `plugin-check` / `knowledge-status` / `knowledge-add` / `knowledge-autofill`)
-- **`bin/opphub-oauth-login.js`** — 拆 `deviceFlowLogin` → `startDeviceFlow` + `pollDeviceFlow` (舟哥 12:44 钉的 chat 版 2 步走)
+- **`bin/opphub-oauth-login.js`** — 拆 `deviceFlowLogin` → `startDeviceFlow` + `pollDeviceFlow` (维护者 12:44 钉的 chat 版 2 步走)
   - `start`: 拿 device_code + user_code + verification_url, 不 poll, 不自动 openBrowser (bot 跑没 stdin)
   - `poll`: 阻塞 poll 拿 access_token, 可传 `--device-code --interval --expires-in`
   - `login` 老姿势保留 (SSH/headless, 一键全跑)
@@ -29,10 +29,10 @@
 ### 文档 (Docs)
 
 - `docs/v3.1-architecture.md` (781 行) — skill 层设计稿 (主档, 6 步闭环 + 知识库 6 段 + 工作分解)
-- `docs/runtime-channel-renderer-v31-design.md` (286 行) — OpenClaw runtime 渲染层 (舟哥 13:28, 独立存档等 OpenClaw runtime 团队接)
+- `docs/runtime-channel-renderer-v31-design.md` (286 行) — OpenClaw runtime 渲染层 (维护者 13:28, 独立存档等 OpenClaw runtime 团队接)
 - `docs/server-schema-v31-design.md` (113 行) — opphub-server schema (12:58 + 13:41, 独立存档等 opphub-server 团队接)
 
-### 拍板来源 (舟哥 9 轮 DM)
+### 拍板来源 (维护者 9 轮 DM)
 
 | # | 拍板 | 时间 |
 |---|---|---|
@@ -66,7 +66,7 @@
 | Step 9 dry-run + changelog + workboard 卡 | 0.5h |
 | **合计** | **4.5h** (跟计划一致) |
 
-## v3.1.0-alpha.3 (2026-07-17 · 舟哥 14:20-14:23 拍 "代码都得改")
+## v3.1.0-alpha.3 (2026-07-17 · 维护者 14:20-14:23 拍 "代码都得改")
 
 > **核心改造**: skill 不再自实现 token refresh (本来 11845 bytes 双源 dup), **改 import plugin dist/oauth-client.js**, plugin 成为 Keychain 单写入方 (source of truth).
 
@@ -100,7 +100,7 @@
 - `INTERNAL.md` / `flow/registration.md`
 - plugin v0.7.4 timer (60s auto-refresh) — **保留**,plugin 写 Keychain, skill 只是读
 
-### 拍板来源 (舟哥 14:20-14:23 3 轮 DM)
+### 拍板来源 (维护者 14:20-14:23 3 轮 DM)
 
 | # | 拍板 | 时间 |
 |---|---|---|
@@ -127,7 +127,7 @@
 | 验证 + 修复 sync/async 残留 | 10 min |
 | **合计** | **~1.75h** (在 2-3h 预算内) |
 
-## v3.1.0-alpha.3.2 (2026-07-17 14:42 · 舟哥 14:41/15:00 拍 3 个 bug)
+## v3.1.0-alpha.3.2 (2026-07-17 14:42 · 维护者 14:41/15:00 拍 3 个 bug)
 
 > **bug 1** ("偶合登陆"): `oauth-login --json` 报 unknown_command
 > **bug 2** ("偶合登出"): `oauth-logout` 报 clearToken is not defined
@@ -181,15 +181,15 @@
 - 其他 v3.1.0-alpha.1 / alpha.3 改动
 
 
-## v3.1.0-alpha.3.3 (2026-07-17 15:04 · 舟哥 15:03/15:04 拍 "完整 logout")
+## v3.1.0-alpha.3.3 (2026-07-17 15:04 · 维护者 15:03/15:04 拍 "完整 logout")
 
-> **bug 抓的逻辑链 (舟哥 15:03)**: "登出么,插件那边也得退出的啊"
+> **bug 抓的逻辑链 (维护者 15:03)**: "登出么,插件那边也得退出的啊"
 >
 > 现状: alpha.3.2 logout 只 clearToken, plugin runtime 不知道, ws client 没断, 没推卡片
 > 目标: 跟 plugin onFatal 路径 (src/index.ts:1471) 同步 — 4 步
 >   1) clearToken        ✅ (alpha.3.2 做了)
 >   2) clearStartState   🆕 (本 alpha)
->   3) 推 IntentMessage  🆕 (走 OpenClaw runtime skillApi, 不拼飞书 card JSON · 舟哥 13:28 钉)
+>   3) 推 IntentMessage  🆕 (走 OpenClaw runtime skillApi, 不拼飞书 card JSON · 维护者 13:28 钉)
 >   4) wsClient.stop     noop (plugin runtime 不在, 下次 plugin 启走 onFatal self-cleanup)
 
 ### 改 (Changed)
@@ -265,16 +265,16 @@
 | `opphub login-start --json` | ✅ 复用 start | ✅ logout 后新起 (不复用) |
 
 
-## v3.1.0-alpha.3.4 (2026-07-17 15:14 · 舟哥 15:06/15:08/15:14 拍 "configure 还没弄好")
+## v3.1.0-alpha.3.4 (2026-07-17 15:14 · 维护者 15:06/15:08/15:14 拍 "configure 还没弄好")
 
 > **bug 抓的逻辑链**:
-> - 15:06 舟哥: "bin/opphub-configure.js 还没弄好"
-> - 15:08 舟哥: "假设插件都还没安装,肯定是在skill上跑啊configure, 我之前不是设计过了么,你不看文档么"
-> - 15:14 舟哥: "读取 openclaw 官方的 list"
+> - 15:06 维护者: "bin/opphub-configure.js 还没弄好"
+> - 15:08 维护者: "假设插件都还没安装,肯定是在skill上跑啊configure, 我之前不是设计过了么,你不看文档么"
+> - 15:14 维护者: "读取 openclaw 官方的 list"
 >
 > **设计意图 (v3.1-architecture.md §9.2 line 717-721)**:
-> - 舟哥 12:42 拍 "configure 功能可放 skill 里, 或 2 个都有"
-> - 舟哥 12:47 拍 "configure 完必须引导装 plugin, 这样才有效"
+> - 维护者 12:42 拍 "configure 功能可放 skill 里, 或 2 个都有"
+> - 维护者 12:47 拍 "configure 完必须引导装 plugin, 这样才有效"
 > - **关键闭环**: plugin 没装时 skill 也能跑 configure (走 openclaw 官方 CLI, 不依赖 plugin runtime)
 
 ### 修 (Bug Fixes)

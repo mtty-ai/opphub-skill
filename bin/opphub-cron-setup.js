@@ -5,11 +5,11 @@
 // 用途: 自动建 opphub-skill-daily-check cron 任务 (架构 B isolated + announce last)
 //       幂等: 重复跑不会重复建, 自动覆盖原 config
 //
-// 设计 (老板 2026-07-06 10:14 + v3.0.0 协商):
+// 设计 (维护者 2026-07-06 10:14 + v3.0.0 协商):
 // - 任务名固定 'opphub-skill-daily-check' (升级不变化)
 // - 调度: cron "0 9 * * *" @ Asia/Shanghai (可配 OPPHUB_CRON_EXPR / OPPHUB_CRON_TZ)
-// - sessionTarget: isolated (老板 7/06 架构 B 拍点)
-// - delivery: announce last (老板 7/06 10:23 拍不硬编码通道)
+// - sessionTarget: isolated (维护者 7/06 架构 B 拍点)
+// - delivery: announce last (维护者 7/06 10:23 拍不硬编码通道)
 // - argv: [node, bin/opphub-check-update.js]
 //       (alpha.5 占位, alpha.6 实跑检查 clawhub 版本)
 //
@@ -75,9 +75,9 @@ async function cronExists() {
   return all.find((j) => j.name === CRON_NAME) ?? null;
 }
 
-// 调 openclaw cron add 建 cron (架构 B 标准模板, 老板 7/06 10:14 拍)
+// 调 openclaw cron add 建 cron (架构 B 标准模板, 维护者 7/06 10:14 拍)
 
-// 老板 11:08 拍: default user = 当前用户 (这台机 dev bot 视角的老板 open_id)
+// 维护者 11:08 拍: default user = 当前用户 (这台机 dev bot 视角的维护者 open_id)
 // 从 credentials 读, 没读到再 fallback 硬编码 (USER.md 钉的)
 async function resolveDefaultUserOpenId() {
   const candidates = [
@@ -93,16 +93,16 @@ async function resolveDefaultUserOpenId() {
       } catch {}
     }
   }
-  // fallback: USER.md 钉死 (老板本人)
+  // fallback: USER.md 钉死 (维护者本人)
   return "ou_9d50fceb003e656df75c234bf2ff9351";
 }
 
 
-// alpha.6 (老板 11:21 拍): 调 server /api/opc/me 拿 defaultChannel
+// alpha.6 (维护者 11:21 拍): 调 server /api/opc/me 拿 defaultChannel
 // 设计: skill 不再硬编码 channel, server 告诉 skill "我是谁 + 默认推哪"
 // 回退: /api/opc/me 不存在/未实现 → fallback 到本地 dev/ou_9d50fceb (alpha.5.1)
 async function fetchDefaultChannel(accessToken) {
-  // 走 server 真接口 (老板 11:18 拍架构: server 是中间层)
+  // 走 server 真接口 (维护者 11:18 拍架构: server 是中间层)
   try {
 
     const url = new URL("https://api.opphub.ruiplus.cn/api/opc/me");
@@ -176,8 +176,8 @@ async function darwinKeychainGet(account) {
 }
 
 async function cronAdd() {
-  // alpha.6 (老板 11:21 拍): 从 server /api/opc/me 拿 defaultChannel
-  // 拿不到 → fallback alpha.5.1 hardcoded dev/ou_9d50fceb (老板自用)
+  // alpha.6 (维护者 11:21 拍): 从 server /api/opc/me 拿 defaultChannel
+  // 拿不到 → fallback alpha.5.1 hardcoded dev/ou_9d50fceb (维护者自用)
   let delivery = { source: "alpha5_fallback" };
   try {
     const raw = await darwinKeychainGet("opphub:default");
@@ -197,7 +197,7 @@ async function cronAdd() {
     delivery.reason = e.message ?? String(e);
   }
 
-  // fallback: 拿不到 server 给的, 用 alpha.5.1 老板自用 default
+  // fallback: 拿不到 server 给的, 用 alpha.5.1 维护者自用 default
   if (delivery.source !== "server") {
     delivery.channelType = "feishu";
     delivery.accountId = "dev";
