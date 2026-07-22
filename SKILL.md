@@ -1,33 +1,52 @@
 ---
 name: opphub
-version: 3.1.0-alpha.1
+version: 4.0.0-alpha.1
 description: 偶合 OppHub · OpenClaw bot skill · OPC 用户在 chat @bot 对话 · 走 device flow OAuth · 6 步闭环 + 开放式知识库 · 与 opphub-plugin 共 Keychain
 author: mtty-ai
 homepage: https://github.com/mtty-ai/opphub-skill
 entry: bin/opphub
+defaultLocale: zh-CN
 requires:
-  bins: [jq, curl, openssl, base64]
+  # v4.0.0-alpha.1 P2-2: frontmatter requires 完整声明
+  # 之前 bins 只列 4 个, 缺 node/openclaw/security/spawn 等核心依赖, 安装器/runtime 报错模糊
+  # 修复: 补全真实依赖 + 分平台 (macOS 需 security, Linux 需 openssl, Windows 暂不支持)
+  bins:
+    - node>=18                # 全部 bin 都依赖 (ESM, AbortSignal.timeout, global fetch)
+    - openclaw                # channel 读取 (openclaw channels list --json), cron 读取
+    - jq                      # JSON 处理 (cron list 解析)
+    - curl                    # HTTP 调用 (OAuth device flow fallback)
+    - gh                      # check-update 比对远端版本
+    - security                # macOS Keychain (read/write/refresh token)
+    - openssl                 # Linux AES-256-GCM token 加密
+    - base64                  # JWT decode
+    - xdg-open                # Linux 浏览器打开 (OAuth device flow)
   env: []
+  platform:
+    darwin: full              # 全功能
+    linux: full               # 全功能 (openssl 替代 security)
+    windows: none             # 暂不支持
   # v3.1 (舟哥 13:15 + 13:18 钉): skill 调用 LLM 工具 + 本机 memory + wiki 作为数据源
   tools:
-    - minimax__web_search           # 联网搜公司信息 (舟哥 13:15)
-    - web_fetch                      # 拉 URL (知乎/小红书/公众号/官网)
-    - minimax__understand_image      # 解析用户上传图片
-    - pdf                            # 解析 BP / 案例集 PDF
-    - memory_search                  # 搜本机 memory (舟哥 13:18)
-    - memory_get                     # 读 MEMORY.md / 某天 daily
-    - wiki_search                    # 搜 wiki 990 sources
-    - wiki_get                       # 读 wiki_page
-    - wiki_status                    # 看 wiki 状态
+    - web_search              # 联网搜公司信息 (舟哥 13:15) - 统一命名
+    - web_fetch               # 拉 URL (知乎/小红书/公众号/官网)
+    - understand_image        # 解析用户上传图片
+    - pdf                     # 解析 BP / 案例集 PDF
+    - memory_search           # 搜本机 memory (舟哥 13:18)
+    - memory_get              # 读 MEMORY.md / 某天 daily
+    - wiki_search             # 搜 wiki 990 sources
+    - wiki_get                # 读 wiki_page
+    - wiki_status             # 看 wiki 状态
     # OpenClaw runtime 注入 (不是 requires, 默认 skill turn 能调):
     # - bot.skillApi.send / askInteractive / askFreeText / getChannel (舟哥 13:28 钉)
-defaultLocale: zh-CN
 metadata:
   api: https://api.opphub.ruiplus.cn
   deviceFlow:
     authorize: https://api.opphub.ruiplus.cn/api/oauth/device/code
     token: https://api.opphub.ruiplus.cn/api/oauth/device/token
     userinfo: https://api.opphub.ruiplus.cn/api/oauth/userinfo
+  refreshToken:
+    endpoint: https://api.opphub.ruiplus.cn/api/oauth/token
+    grant_type: refresh_token
   client_id: opphub-plugin
   scope: profile ws:read ws:write
   storage:
