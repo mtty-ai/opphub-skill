@@ -1,16 +1,11 @@
 #!/usr/bin/env node
-// bin/opphub-knowledge-card.js · v3.2.0-alpha.2
+// bin/opphub-knowledge-card.js · v4.0
 // status: implemented (v4 P0-4 歧义分支必 return, 避免双 JSON 输出)
 //
-// 维护者 7/20 12:31 拍 v3.1 引导流程 阶段 2 + 3
 //   行业推断 (按工商/招聘关键词)
 //   按行业模板拆能力卡片 + 行业经验 + 上下游 + 同业
 //   输出 cards[] 数组 (供阶段 5 批量入库)
 //
-// 维护者 7/20 13:35 钉死: 不允许 skill 编写和瞎猜
-//   v3.2-alpha.1 实现的 "模板填空" 被禁用 (会产生不入实证据的虚假能力卡片)
-//   v3.2-alpha.2 改为: rawText 有证据 → 拆, rawText 无证据 → 跳过 (不入 unmatchedTemplates)
-//   行业撞分 (top1 == top2) → 返 ambiguous, 让维护者拍实际行业
 //   行业证据弱 (top <= 1) → 返 unknown, 不猜
 //
 // 用法: bot 调
@@ -20,17 +15,13 @@
 //
 // card.type 枚举:
 //   - "ability"   能力卡片
-//   - "industry"  行业经验 (v3.2-alpha.2 未实现, 缺口)
 //   - "upstream"  上游依赖
 //   - "downstream" 下游服务
-//   - "peer"      同业 / 互补 (v3.2-alpha.2 未实现, 缺口)
 //
 // 实现:
 //   - 本 bin 用 LLM 调 (minimax) 推断行业 + 拆卡 (skill turn 调)
-//   - 行业模板: v3.2-alpha.2 内置 MCN + SaaS 2 个 (维护者文档定)
 //   - 拆卡规则: rawText 命中模板词 → 拆; rawText 不命中 → 跳过, 不入库
 //
-// 不做的事 (7/20 13:35 钉死 红线):
 //   - 不入库 (阶段 5 才入库)
 //   - 不模板填空 — 模板 dimension/purpose 在 rawText 中无证据 → 不拆, 返 unmatchedTemplates
 //   - 不假装推断行业 — 撞同分返 ambiguous, 顶分<=1 返 weak
@@ -67,7 +58,6 @@ const INDUSTRY_SIGNALS = {
   mfg: ["注塑", "模具", "装配", "质检", "工艺设计", "供应链"],
 };
 
-// 行业模板 (维护者 7/20 拍: v3.2 第一版只 MCN + SaaS)
 const INDUSTRY_TEMPLATES = {
   mcn: {
     name: "MCN / 数字营销",
@@ -125,7 +115,6 @@ const INDUSTRY_TEMPLATES = {
 };
 
 // 推断行业 (基于 rawText 关键词匹配)
-// 维护者 7/20 13:35 钉死: 不准假装推断行业 — 撞同分返 ambiguous, 让用户拍
 function inferIndustry(rawText) {
   const scores = {};
   for (const [code, keywords] of Object.entries(INDUSTRY_SIGNALS)) {
@@ -159,7 +148,6 @@ function inferIndustry(rawText) {
 }
 
 // 按模板 + rawText 拆卡
-// 维护者 7/20 13:35 钉死: 不准模板填空 — 只拆 rawText 里真命中的事实, 缺事实的标 "未查到, 入库风险高"
 // 改: 返回 { cards, unmatchedTemplates }, unmatchedTemplates 列出模板里有但 rawText 没证据的
 function generateCards(name, industryCode, rawText) {
   const template = INDUSTRY_TEMPLATES[industryCode] || INDUSTRY_TEMPLATES.unknown;
@@ -284,8 +272,6 @@ async function main() {
   }
 
   // 行业撞分 / 证据弱 → 不准拆卡, C2 修复: 返 askInteractive (不 process.exit)
-  //   - ambiguous: topTwo 两个选项 + askUser=true, bot 走 bot.skillApi.askInteractive 让维护者拍
-  //   - weak:      topOne = unknown, 仅跳问 "是哪类?", 给 5 个选项 (mcn/saas/law/mfg/unknown) 让维护者拍
   //
   // v4.0.0 P0-4: 歧义分支输出后立即 return, 不再继续 generateCards
   //   之前漏 return → INDUSTRY_TEMPLATES[industryCode='ambiguous'] fallback 到 'unknown'
@@ -299,16 +285,13 @@ async function main() {
         options.push({
           id: t.code,
           label: `${INDUSTRY_TEMPLATES[t.code]?.emoji ?? "?"} ${INDUSTRY_TEMPLATES[t.code]?.name ?? t.code}`,
-          hint: `rawText 撞同分 ${t.score} (需维护者拍哪个准)`,
         });
       }
     } else {
-      // weak: 5 个选项都给维护者拍
       for (const code of ["mcn", "saas", "law", "mfg", "unknown"]) {
         options.push({
           id: code,
           label: `${INDUSTRY_TEMPLATES[code]?.emoji ?? "?"} ${INDUSTRY_TEMPLATES[code]?.name ?? code}`,
-          hint: code === "unknown" ? "rawText 行业信号太弱 (顶分<=1), 不准猜" : "维护者拍",
         });
       }
     }
@@ -316,8 +299,6 @@ async function main() {
       ok: false,
       error: industryCode === "ambiguous" ? "industry_ambiguous" : "industry_weak_evidence",
       message: industryCode === "ambiguous"
-        ? "rawText 多行业信号撞同分, skill 不准 pick one — 需维护者拍实际行业"
-        : "rawText 行业信号太弱 (顶分<=1), skill 不准猜 — 需维护者拍行业",
       name,
       industry: { state: industryState, scores: industryScores, topTwo },
       cards: [],
@@ -325,7 +306,6 @@ async function main() {
       askInteractive: true,                // C2 补: 返 askInteractive 而不是 process.exit
       options,                              // bot 走 askInteractive 时用
       actions: [                            // bot 拿 actions 拼 "重跑" 按钮 payload
-        { id: "rerun", label: "重跑 (维护者拍后)", style: "primary" },
         { id: "skip",  label: "跳过 (不拆卡)",   style: "danger" },
       ],
       nextStep: "ask user 选行业, 然后 bot 重跑: opphub knowledge-card --raw-text <rawText> --industry <pickedCode> --json",
@@ -333,7 +313,6 @@ async function main() {
     if (wantJson) {
       console.log(JSON.stringify(result, null, 2));
     } else {
-      console.log(`🚫 ${name}: 行业无法可靠推断, 不准按模板拆 (返 askInteractive 让维护者拍)`);
       console.log(JSON.stringify(result, null, 2));
     }
     // v4.0.0 P0-4: 立即 return, 不再继续 generateCards 产生第 2 份 JSON
@@ -343,7 +322,6 @@ async function main() {
   const template = INDUSTRY_TEMPLATES[industryCode] || INDUSTRY_TEMPLATES.unknown;
   const { cards, unmatchedTemplates } = generateCards(name, industryCode, args.rawText);
 
-  // 维护者 7/20 13:35 钉死: cards 全空 / unmatchedTemplates 全在 = 没东西可入库, 准返 ask_user
   const result = {
     ok: cards.length > 0,
     warning: cards.length === 0 ? "rawText 跟所有行业模板都无证据命中, skill 不准瞎填, 空入库不允许" : (unmatchedTemplates.length > 0 ? `有 ${unmatchedTemplates.length} 条模板字段因无证据未拆 (见 unmatchedTemplates) — 这些不准入库` : null),

@@ -1,19 +1,14 @@
 #!/usr/bin/env node
-// opphub-cron-setup.js · v3.0.0-alpha.5
+// opphub-cron-setup.js · v4.0
 // status: deprecated (v4 cron v3 起改 trigger plugin 写, peer 由 plugin 维护)
 //
 // 用途: 自动建 opphub-skill-daily-check cron 任务 (架构 B isolated + announce last)
 //       幂等: 重复跑不会重复建, 自动覆盖原 config
 //
-// 设计 (维护者 2026-07-06 10:14 + v3.0.0 协商):
 // - 任务名固定 'opphub-skill-daily-check' (升级不变化)
 // - 调度: cron "0 9 * * *" @ Asia/Shanghai (可配 OPPHUB_CRON_EXPR / OPPHUB_CRON_TZ)
-// - sessionTarget: isolated (维护者 7/06 架构 B 拍点)
-// - delivery: announce last (维护者 7/06 10:23 拍不硬编码通道)
 // - argv: [node, bin/opphub-check-update.js]
-//       (alpha.5 占位, alpha.6 实跑检查 clawhub 版本)
 //
-// alpha.5 步骤:
 // 1. 调 'openclaw cron list --json' 查 opphub-skill-daily-check 在不在
 // 2. 在 → 返 'already_installed', 顺便报 last_run / next_run / enabled
 // 3. 不在 → 调 'openclaw cron add' 建 (带 --force 防止重名)
@@ -75,10 +70,8 @@ async function cronExists() {
   return all.find((j) => j.name === CRON_NAME) ?? null;
 }
 
-// 调 openclaw cron add 建 cron (架构 B 标准模板, 维护者 7/06 10:14 拍)
 
-// 维护者 11:08 拍: default user = 当前用户 (这台机 dev bot 视角的维护者 open_id)
-// 从 credentials 读, 没读到再 fallback 硬编码 (USER.md 钉的)
+// 从 credentials 读, 没读到返 null 让上层处理 (不硬编码 user ID, 公开包不能含内部 ID)
 async function resolveDefaultUserOpenId() {
   const candidates = [
     join(process.env.HOME || "", ".openclaw/credentials/feishu-dev-allowFrom.json"),
@@ -93,16 +86,12 @@ async function resolveDefaultUserOpenId() {
       } catch {}
     }
   }
-  // fallback: USER.md 钉死 (维护者本人)
-  return "ou_9d50fceb003e656df75c234bf2ff9351";
+  return null;
 }
 
 
-// alpha.6 (维护者 11:21 拍): 调 server /api/opc/me 拿 defaultChannel
 // 设计: skill 不再硬编码 channel, server 告诉 skill "我是谁 + 默认推哪"
-// 回退: /api/opc/me 不存在/未实现 → fallback 到本地 dev/ou_9d50fceb (alpha.5.1)
 async function fetchDefaultChannel(accessToken) {
-  // 走 server 真接口 (维护者 11:18 拍架构: server 是中间层)
   try {
 
     const url = new URL("https://api.opphub.ruiplus.cn/api/opc/me");
@@ -155,7 +144,6 @@ async function fetchDefaultChannel(accessToken) {
   }
 }
 
-// alpha.6: 读 Keychain access_token (复用 plugin v0.4.0+ 同构 - 含 base64 decode)
 async function darwinKeychainGet(account) {
   return new Promise((resolve) => {
     const sp = spawn("security", ["find-generic-password", "-s", "openclaw-opphub-uat", "-a", account, "-w"], { stdio: ["ignore", "pipe", "pipe"] });
@@ -176,8 +164,6 @@ async function darwinKeychainGet(account) {
 }
 
 async function cronAdd() {
-  // alpha.6 (维护者 11:21 拍): 从 server /api/opc/me 拿 defaultChannel
-  // 拿不到 → fallback alpha.5.1 hardcoded dev/ou_9d50fceb (维护者自用)
   let delivery = { source: "alpha5_fallback" };
   try {
     const raw = await darwinKeychainGet("opphub:default");
@@ -197,7 +183,6 @@ async function cronAdd() {
     delivery.reason = e.message ?? String(e);
   }
 
-  // fallback: 拿不到 server 给的, 用 alpha.5.1 维护者自用 default
   if (delivery.source !== "server") {
     delivery.channelType = "feishu";
     delivery.accountId = "dev";
@@ -295,7 +280,6 @@ async function main() {
         delivery: cronAddResult.delivery,
         hint: cronAddResult.delivery.source === "server"
           ? "cron 每天 09:00 跑 check-update, 推送到 server 给的 defaultChannel"
-          : `cron 每天 09:00 跑 check-update, fallback 到 alpha.5.1 dev/ou_9d50fceb (${cronAddResult.delivery.reason ?? "无 reason"})`,
       });
       return;
     } catch (e) {

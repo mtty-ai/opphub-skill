@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// opphub-oauth-login.js · v3.0.0-alpha.1
+// opphub-oauth-login.js · v4.0
 // status: implemented (v4 P1-1 start 复用前置 + P0-2 spawn argv)
 //
 // 用途: OPC 用户在 OpenClaw chat 里 @bot 说"偶合登录",bot 调这个脚本走 OAuth Device Flow,
@@ -11,12 +11,8 @@
 //   - 同一 scope (profile ws:read ws:write)
 //   - 同 REFRESH_AHEAD_MS = 5min
 //
-// alpha.1 状态: 接真 server (https://api.opphub.ruiplus.cn), 弹真浏览器
 //   - server 端接口 (device/code + device/token + userinfo) 已知存在 (plugin v0.4.0 在用)
-//   - 还没做 refresh_token 自动刷新 + 重试 + 限流 (alpha.2 补)
-//   - 还没做 error code 分类 (alpha.2 补, 借鉴 plugin NeedAuthorizationError / AccessDeniedError / DeviceCodeExpiredError)
 
-// v3.1.0-alpha.3 (维护者 14:21 拍 "代码都得改"):
 //   skill 不再双源重写 readToken/writeToken/keychain.
 //   改 import plugin client (lib/opphub-plugin-client.js) → plugin = source of truth
 import { exec, execFile } from "node:child_process";
@@ -121,16 +117,12 @@ async function openUrl(url) {
   }
 }
 
-// === Keychain 存储 + token 状态 (v3.1.0-alpha.3: 全部从 lib/opphub-plugin-client.js proxy 来) ===
 // skill 不再自实现 darwinKeychain*/aesGcm*/writeToken/readToken/tokenStatus
 // 跟 plugin 共享同一个 Keychain entry (写死 plugin = source of truth)
-// (维护者 14:21 拍 "代码都得改")
 
-// === 主流程: device flow · v3.1 拆 start / poll (维护者 12:44 钉: chat 版 2 步走) ===
 // startDeviceFlow: 拿 device_code + user_code + verification_url, 不 poll
 // pollDeviceFlow: 阻塞 poll 拿 access_token
 async function startDeviceFlow() {
-  // v4.0.0 P1-1: start 复用前置 (维护者 7/20 14:01 拍的 bug fix 之前顺序错)
   //   之前: 先请求 server 拿 device_code (老的被作废) → 后读 start state 检查复用
   //         复用逻辑永远不命中, 浪费 1 个 device_code
   //   修: 先读 start state, 命中复用就 return, 没命中再请求 server
@@ -147,7 +139,6 @@ async function startDeviceFlow() {
       interval: 5,
       browser_opened: false,
       reused: true,  // bot 知道这是复用, 不再出新的 user_code 让用户输
-      hint: "复用上次 start, 不重复 (维护者 14:01 抓的 bug fix, v4 顺序前置)",
       next_steps: {
         bot_prompt: `🟡 复用上次的 device_code, 不重复弹验证码
 
@@ -186,7 +177,6 @@ ${recent.verification_uri_complete}
     opened = await openUrl(verificationUriComplete);
   }
 
-  // 保存 start state (维护者 14:01 bug fix: 让 30s 内的重复 start 复用)
   saveStartState(dc.device_code, dc.user_code, verificationUriComplete, Date.now() + dc.expires_in * 1000, dc.expires_in);
 
   // 3. bot 拿到这串去出 IntentMessage (channel-agnostic)
@@ -234,7 +224,6 @@ async function pollDeviceFlow({ deviceCode, interval, expiresIn }) {
     });
     const data = await tokenResp.json().catch(() => ({}));
     if (tokenResp.ok && data.access_token) {
-      // alpha.3: 优先从 JWT 解 opcId (与 plugin 同构), fallback 才调 userinfo
       const jwtPayload = decodeJwtPayload(data.access_token);
       let opcId = jwtPayload?.opcId ?? jwtPayload?.sub ?? "";
       if (!opcId) {
@@ -251,14 +240,11 @@ async function pollDeviceFlow({ deviceCode, interval, expiresIn }) {
         obtained_at: new Date().toISOString(),
       };
 
-      // alpha.5: 登录后自动调 cron-setup (子进程, 幂等)
-      // v3.1.0-alpha.2 (维护者 14:06 poll bug fix): 用 path.dirname + path.join, 不依赖 ESM 变量
       // v4.0.0 P0-2: 改 execFile argv 形式, 避免路径带空格 + shell 注入
       const path = await import("node:path");
       const urlMod = await import("node:url");
       const __filename = urlMod.fileURLToPath(import.meta.url);
       const __skillDir = path.dirname(__filename);
-      // alpha.5: 登录后自动调 cron-setup (子进程, 幂等), 从 alpha.7 抄回来 (v3.1.0-alpha.1 漏定义)
       async function runCronSetup() {
         try {
           const { stdout } = await execpFile("node", [join(__skillDir, "bin/opphub-cron-setup.js"), "setup"]);
@@ -272,7 +258,6 @@ async function pollDeviceFlow({ deviceCode, interval, expiresIn }) {
         }
       }
       await writeToken(t);
-      // v3.1.0-alpha.2 (维护者 14:01 bug fix): 登录成功清 start state
       clearStartState();
       const cronSpawn = await runCronSetup();
       out({
@@ -285,7 +270,6 @@ async function pollDeviceFlow({ deviceCode, interval, expiresIn }) {
           : `AES-256-GCM (~/.opphub-plugin/token.json)`,
         cron_auto_setup: cronSpawn.action ?? "unknown",
         cron_check: cronSpawn.cron_check ?? null,
-        // alpha.5: bot 拿来贴飞书卡片的自然语言话术 (维护者 10:18 拍)
         next_steps: {
           bot_prompt: `✅ 登录成功！OPC ID: ${opcId}
 
@@ -306,7 +290,6 @@ async function pollDeviceFlow({ deviceCode, interval, expiresIn }) {
     if (data.error === "slow_down") { pollInterval += 5000; continue; }
     if (data.error === "expired_token") {
       clearStartState();
-      err("device_flow_expired", "device flow 超时 (维护者 14:01: 请重新跑 login-start)", {
         next_steps: { bot_prompt: "@bot 重新跑偶合登陆" },
       });
     }
@@ -330,7 +313,6 @@ async function fetchUserinfo(accessToken) {
   }
 }
 
-// alpha.3 修复: 从 access_token JWT 解 opcId (与 plugin decodeJwtPayload 同构)
 // 不调 userinfo API (server 端 /api/oauth/userinfo 是否存在未验, plugin 走的是 JWT 解 opcId)
 function decodeJwtPayload(token) {
   try {
@@ -354,7 +336,6 @@ async function main() {
     return i >= 0 && i + 1 < args.length ? args[i + 1] : null;
   }
 
-  // alpha.3: 从 access_token JWT 重解 opc_id (不信任 Keychain 里老 opc_id 字段)
   // 与 plugin decodeJwtPayload 同构
   function resolveOpcId(t) {
     if (!t?.access_token) return null;
@@ -362,8 +343,6 @@ async function main() {
     return payload?.opcId ?? payload?.sub ?? null;
   }
 
-  // alpha.4: 检测 plugin 是否装 + 拿版本号 (文件存在性查)
-  // OpenClaw plugin 装在 ~/.openclaw/extensions/opphub/dist/index.js (维护者本机现状)
   // 读 package.json 的 version
   function checkPluginInstalled() {
     const candidates = [
@@ -388,7 +367,6 @@ async function main() {
   }
 
 
-  // alpha.5: 查 opphub-skill-daily-check cron 是否装 + enabled + 上次跑
   // v4.0.0 P0-2: 改 execFile argv 形式, 避免 shell 注入
   async function getCronCheck() {
     try {
@@ -425,10 +403,8 @@ async function main() {
     }
   }
 
-  // v3.1.0-alpha.4.1 (维护者 7/17 16:58 拍 "skill 没显示选中通道"):
   //   getDefaultChannel 抽到 lib/opphub-server-client.js
   //   configure list + oauth-login status 共享同一份实现, 避免飘走
-  //   这里只是 thin wrapper, 留 alpha.4 16:31 的注释追溯
   async function getDefaultChannel() {
     const { getDefaultChannel: serverGetDefaultChannel } = await import("../lib/opphub-server-client.js");
     return await serverGetDefaultChannel();
@@ -438,7 +414,6 @@ async function main() {
     const t = await readToken();
     const s = await tokenStatus(t);
     const plugin = checkPluginInstalled();
-    // v3.1.0-alpha.3 (维护者 14:20 拍): 集成 plugin OAuth client 健康检查
     // 让 bot 看到 plugin client 能不能正常加载, 不会被 secret 锁卡
     let pluginHealth = { ok: false, error: "plugin_client not loaded" };
     try {
@@ -447,7 +422,6 @@ async function main() {
       pluginHealth = { ok: false, error: e?.message ?? String(e) };
     }
 
-    // v3.1.0-alpha.4 (维护者 7/17 16:31 拍): status 真去 server 拉 default_channel
     // 原代码: default_channel: null (placeholder), 不查 server
     // 真相: server GET /api/user/channels/default 返回 { channelType, channelId, isDefault }
     //      返 { ok:false, error:"no_default" } 表示用户没设 (走 plugin CLI configure 才会设)
@@ -465,7 +439,6 @@ async function main() {
         ? `macOS Keychain (service=openclaw-opphub-uat, account=opphub:default)`
         : `AES-256-GCM (~/.opphub-plugin/token.json)`,
       plugin_oauth_client: pluginHealth,
-      // alpha.4 新加: plugin 检测
       plugin_check: {
         installed: plugin.installed,
         version: plugin.version,
@@ -474,14 +447,10 @@ async function main() {
           ? `plugin v${plugin.version} 已装 · 推送走 server WS 秒级`
           : "plugin 未装 · 推送走 skill 自带 cron(每天 09:00 检查 skill 版本, 不查撮合)",
       },
-      // alpha.5 新加: cron 检测 (维护者 10:44 拍)
       cron_check: await getCronCheck(),
-      // v3.1 (维护者 12:47 / 12:51 / 12:58 钉): 4 字段扩 (placeholder, 待 E2E 联调)
-      default_channel: defaultChannel,  // v3.1.0-alpha.4 (维护者 16:31): 真去 server 拉 default_channel, 不是 placeholder
       knowledge_status: {
         entries: 0,           // 后续调 bin/opphub-knowledge-status 填 (server 端 GET /api/knowledge)
         lastKnowledgeAt: null,
-        hint: "knowledge_status 待 server 端 OpcKnowledgeEntry schema 落地 (opphub-server 团队活, 13:41 钉)",
       },
       link_health: {
         ws_connected: false,  // 待 plugin v0.6.x 上报 server ws 状态后填
@@ -493,14 +462,12 @@ async function main() {
   }
 
   if (cmd === "logout") {
-    // v3.1.0-alpha.3.3 (维护者 15:04 拍 "完整 logout (10 min)"):
     //   4 步:
     //     1) clearToken() (Keychain)        ✅
     //     2) 清 cfg.devToken (plugin v0.5.30 noop, 重启即丢)
     //     3) 推飞书卡片 (走 IntentMessage → bot.skillApi.send → runtime 渲染层)
     //     4) WS client.stop (plugin runtime 不在 → noop; 下次 plugin 启拿 stale token 走 onFatal)
     //
-    // 维护者 13:28 钉 "skill 不拼飞书 card JSON, 走 OpenClaw runtime skillApi 渲染层"
     // 所以 skill 这里只返 IntentMessage (channel-agnostic), 让 OpenClaw runtime 渲染
 
     // 1) clearToken
@@ -509,14 +476,12 @@ async function main() {
     // 1.5) 清 skill 自己的 start-state.json (避免下次 start 复用上次的 device_code)
     try { clearStartState(); } catch {}
 
-    // 2) plugin cfg.devToken: skill 动不了 plugin cfg (7/9 17:00 红线: 不碰容器不碰 plugin)
     //   plugin 重启后 cfg 没 devToken 就跟新装一样
 
     // 3) IntentMessage (channel-agnostic, bot 拿到自动推)
     out({
       ok: true,
       stage: "logged_out",
-      // v3.1 IntentMessage 格式 (维护者 13:28 钉)
       intent: {
         header: {
           title: "✅ 偶合 OppHub 已登出",
@@ -572,20 +537,16 @@ async function main() {
 
   if (cmd === "login") {
     // 老姿势保留: 直接 start + 自动 poll (兼容 SSH/headless)
-    // v3.1.0-alpha.2 (维护者 14:01 bug fix): already_logged_in 直接 return, 不要 start
     // (之前会让 poll 的 device_code 被新 start 作废)
     const t = await readToken();
     const s = await tokenStatus(t);
     if (s === "valid") {
-      // v3.1.0-alpha.3 (维护者 7/17 16:18 拍): 已登录后引导到下一步
       // 原始: 只返 already_logged_in 文本, 不查 plugin/configure/knowledge 状态
       // 改造: 检查 4 件事, 哪件没做引导到下一步
       const plugin = checkPluginInstalled();
       const cron = await getCronCheck();
-      // v3.1.0-alpha.4 (维护者 7/17 16:31 拍): 已登录状态也去 server 拉 default_channel
       const defaultChannel = await getDefaultChannel();
       // knowledge_status: 调 bin/opphub-knowledge-status (subprocess)
-      // (v3.1.0-alpha.3 走 import.meta.url + 2 次 path.dirname 拿 skill 根 (不是 bin/))
       // v4.0.0 P0-2: 改 execFile argv 形式, 避免路径带空格 + shell 注入
       let knowledge = null;
       try {
@@ -626,7 +587,6 @@ async function main() {
           cmd: "@bot 偶合知识库",
         });
       }
-      // default_channel 引导: v3.1.0-alpha.4 (维护者 16:31) 调 getDefaultChannel() 真拉 server,
       //   selected != null (用户已设) → 不引导
       //   selected == null (server 返 no_default) → 引导设默认通道
       if (!defaultChannel.selected) {
@@ -644,7 +604,6 @@ async function main() {
         stage: "already_logged_in",
         opc_id: resolveOpcId(t),
         expires_at: new Date(t.expires_at).toISOString(),
-        // v3.1.0-alpha.3 护送: 4 件状态
         status_snapshot: {
           plugin: plugin.installed
             ? { installed: true, version: plugin.version, hint: "✅ plugin v" + plugin.version + " 已装, 推送链路通" }
@@ -653,7 +612,6 @@ async function main() {
           knowledge: knowledge
             ? { entries: knowledge.knowledgeCount ?? 0, hint: knowledge.hint }
             : { entries: null, hint: "knowledge_status 未拉取" },
-          default_channel: defaultChannel,  // v3.1.0-alpha.4 (维护者 16:31): 真拉 server 端 OpcChannel.selected
         },
         next_steps: {
           bot_prompt: next.length > 0
@@ -677,7 +635,6 @@ async function main() {
     return;
   }
 
-  // v3.1 chat 版 2 步走 (维护者 12:44 钉)
   if (cmd === "start") {
     await startDeviceFlow();
     return;
@@ -693,7 +650,6 @@ async function main() {
     return;
   }
 
-  // v3.1.0-alpha.3.2 (维护者 14:41 拍 "偶合登陆不能用"):
   //   bot 调用 oauth-login --json, argv[2]=--json 不是子命令名, 报 unknown_command
   //   修法: 把 --json 这种 flag 拿掉, 重派发到默认 login
   if (cmd && cmd.startsWith("--")) {

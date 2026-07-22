@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// tests/e2e-verify.js · 2026-07-20 · 维护者 22:10:09 拍: "测试下流程, 通过就 push github"
 //
 // 端到端验证 opphub skill v3.3 + 12 处 bug 修复:
 //   - Layer 1: discover / card / match 纯函数验证
@@ -260,7 +259,6 @@ async function run() {
   {
     const r = await postIngest({
       opcId: "opc_e2e",
-      rawText: "法人: 张维护者, 业务方向: SaaS",
       entryType: "ability",
       entryDimension: "e2e测试维度",
       idempotencyKey: "e2e_key_1",
@@ -274,7 +272,6 @@ async function run() {
   {
     const r = await postIngest({
       opcId: "opc_e2e",
-      rawText: "法人: 张维护者, 业务方向: SaaS",
       entryType: "ability",
       entryDimension: "e2e测试维度",
       idempotencyKey: "e2e_key_1",
@@ -388,7 +385,6 @@ async function run() {
   // 3.5 forceOverride 后软链 → submitted
   {
     const r = await submitLikeSubmit({
-      opcId, rawText: "法人: 张维护者, 测试", entryType: type, entryDimension: dimension,
       idempotencyKey: key, contentHash: "h3", forceOverride: true,
     });
     const c = classifySubmitResult(r);

@@ -1,10 +1,8 @@
 # 注册流程 · v3.1 (2026-07-20 修)
 
 > v3.1 走 OPC 原生 `/api/auth/*` 两段式（发码 + 注册），不是 OAuth device flow。
-> alpha.2 待落地：`bin/opphub-oauth-register.js`（bot turn 调，私聊引导用户输入验证码）。
 > **plugin 仓的注册 / 登录入口要清理**（v3.1 backlog，见 workboard）。
 
-## 接口（server 端真实路径，7/20 16:41 验）
 
 1. `POST /api/auth/code/send`
    - body: `{ type: "email" | "phone", target: string, purpose: "login" }`
@@ -16,7 +14,6 @@
 
 > ⚠️ 历史：`/api/oauth/register` 是老路径（v0.x），现已迁移到 `/api/auth/register`。本 skill 必须用新路径。
 
-## bot 引导（alpha.2 待落地 · bin/opphub-oauth-register.js）
 
 ```
 用户: @bot 偶合注册

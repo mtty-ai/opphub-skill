@@ -1,13 +1,10 @@
 #!/usr/bin/env node
-// opphub-check-update.js · v3.0.0-alpha.6.1.5
+// opphub-check-update.js · v4.0.1.5
 // status: implemented (远端版本比对)
 //
 // 用途: 检查 skill 自身是否有新版本 (供 plugin 调用)
-// alpha.5 占位, alpha.6 实跑 clawhub inspect
-// alpha.6.1.5 (维护者 12:46 拍): cron 不在这里, plugin 接管 cron 维护
 //   - 本输出 不直接 console.log 推 IM (plugin 负责)
 //   - 返回 JSON 结构 ({ ok, status, local, remote, commits, ... }) 供 plugin 渲染后 推 IM
-//   - 维护者 7/06 10:40 拍: 错误一律静默, 不打扰用户
 
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
@@ -17,7 +14,6 @@ import { existsSync, readFileSync } from "node:fs";
 const execp = promisify(exec);
 const __skillDir = dirname(fileURLToPath(import.meta.url));
 
-// alpha.6.1.5 (维护者 12:46): cron 不在这里, plugin 接管
 //   - 默认 mode=json: 返回 JSON 给 plugin 拿去渲染 + 推 IM
 //   - mode=notify: 老 cron 路径保留 (可以兼容), console.log 一行
 function out(obj, mode = "json") {
@@ -46,12 +42,11 @@ function out(obj, mode = "json") {
 
 async function getLocalVersion() {
   // openclaw skills info --json 不返 version, 直接读 SKILL.md frontmatter
-  // skill 安装路径可能在 workspace-dev/skills/opphub 或 ~/.openclaw/skills/opphub
+  // skill 安装路径可能在多个位置, 按优先级探测
   const candidates = [
     process.env.OPPHUB_SKILL_DIR,
     join(__skillDir, ".."),  // bin/ 的上一级
     join(process.env.HOME || "", ".openclaw/skills/opphub"),
-    join(process.env.HOME || "", ".openclaw/workspace-dev/skills/opphub"),
   ].filter(Boolean);
   for (const dir of candidates) {
     const md = join(dir, "SKILL.md");
@@ -75,7 +70,6 @@ async function getLocalVersion() {
 }
 
 async function getRemoteVersion() {
-  // 优先级: 1) GitHub release tag (维护者发版才有)  2) latest commit 的 _meta.json version
   try {
     const { stdout } = await execp(
       "gh release view --repo mtty-ai/opphub-skill --json tagName -q .tagName 2>/dev/null"
@@ -83,7 +77,6 @@ async function getRemoteVersion() {
     const v = stdout.trim().replace(/^v/, "");
     if (v) return v;
   } catch {}
-  // fallback: 拉 main 分支 _meta.json (维护者没发版也能查到)
   try {
     const { stdout } = await execp(
       "gh api repos/mtty-ai/opphub-skill/contents/_meta.json --jq .content 2>/dev/null"
@@ -97,11 +90,7 @@ async function getRemoteVersion() {
 }
 
 function compareSemver(a, b) {
-  // alpha.6.1.2 简化 (维护者 12:12 拍): cron 不关心 duex细节, 直接比含预发布字符串
-  // - "3.0.0-alpha.3" < "3.0.0-alpha.5" → -1
-  // - 退 alpha.5.1 拿 老 cron 后发生过 后台静默 拼错位置,这里改最简
   // 用 字符串数组比, 只要 主.次.补丁 都同名, 就 localeCompare 预发布部分
-  const stripPrefix = (s) => s.replace(/^v/, "").split("-")[0];  // "3.0.0-alpha.5" → "3.0.0"
   const mainA = stripPrefix(a);
   const mainB = stripPrefix(b);
   if (mainA !== mainB) {
@@ -118,7 +107,6 @@ function compareSemver(a, b) {
 }
 
 async function main() {
-  // alpha.6.1.5 (维护者 12:46): plugin 接管 cron 维护
   //   cli 用法: `node opphub-check-update.js [--mode=notify|json]` [--kind=skill|plugin]
   //   --mode=notify (旧, cron 场景)  --mode=json (默认, plugin 场景)
   //   --kind=skill 查 skill, --kind=plugin 查 plugin (拿 不同仓的 SKILL.md / openclaw.plugin.json)
@@ -129,7 +117,6 @@ async function main() {
   }));
 
   const kind = opts.kind ?? "skill";
-  // alpha.6.1.5: 双检查 skill (默认) + plugin (后补)
   // 现在仅 本文件处理 skill (plugin 仓里有自己 的 check-update.ts)
   // plugin 仓调本脚本 是为了查 skill
   // --kind=plugin 暂作未实现 (plugin 仓提供同 API)
@@ -155,7 +142,6 @@ async function main() {
 
   const cmp = compareSemver(local, remote);
   if (cmp < 0) {
-    // alpha.6.1.5 plugin 接管 cron 后, 不需要丰富提示语 (plugin 拿这些数据 自己渲染)
     // 仅返 plugin 需要的 fields: local/remote/upgrade_cmd/repo/source
     out({
       ok: true,
@@ -175,7 +161,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  // alpha.5 静默: cron 跑出错不能打扰用户
   out({ ok: false, status: "error", error: e?.message ?? String(e) });
   process.exit(0); // 不返非0, 让 cron 标记为 ok
 });

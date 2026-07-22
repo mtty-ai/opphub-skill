@@ -2,7 +2,6 @@
 // bin/opphub-token-refresh.js · v4.0.0
 // status: implemented (v4 P0-3 refresh 返对象 + P1-8 错误结构化)
 //
-// 维护者 14:21 拍: "代码都得改"
 //   skill 不再自实现 refresh (原本 11845 bytes 双源 dup), 改走 plugin client proxy
 //   plugin = source of truth (Keychain 单写入方)
 //

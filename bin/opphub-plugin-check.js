@@ -1,9 +1,7 @@
 #!/usr/bin/env node
-// bin/opphub-plugin-check.js · v3.1.0-alpha.1
+// bin/opphub-plugin-check.js · v4.0
 // status: implemented (plugin 探测, v3.1)
 //
-// 维护者 12:47 钉: configure 完必须引导装 plugin, 不引导 = 配置是空的
-// 维护者 13:41 钉: 只到 skill 开放完, 不动 server schema / runtime renderer
 //
 // 用法: bot 调 `opphub plugin-check --json`
 // 返 { ok, installed, version, path, hint, install_cmd }
@@ -16,7 +14,6 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 const CANDIDATE_PATHS = [
-  // OpenClaw 官方扩展路径 (维护者本机 ✅)
   join(homedir(), ".openclaw/extensions/opphub/package.json"),
   // 老版本 / 简化安装
   join(homedir(), "openclaw/plugins/opphub/package.json"),

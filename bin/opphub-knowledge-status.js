@@ -2,13 +2,10 @@
 // bin/opphub-knowledge-status.js · v4.0.0
 // status: implemented (v4 P2-6: GET 改 v2 路径 /api/knowledge?opcId=...)
 //
-// 维护者 12:58 钉: 能力卡片改造 → 开放式知识库, 不进结构化字段
-// 维护者 13:41 钉: 只到 skill 开放完, 不动 server schema
 //
 // v4.0.0 P2-6: 路径统一 v2
 //   旧: GET /api/user/knowledge/status
 //   新: GET /api/knowledge?opcId=...&entryType=...
-//   server 端 app/api/knowledge/route.ts 已支持 GET (实测, 7/22 维护者拍)
 //   POST /api/knowledge/ingest 暂未合并 (server 端保持 /api/user/knowledge/ingest)
 //
 // 用法: bot 调 `opphub knowledge-status --json`
@@ -27,7 +24,6 @@ const API_BASE = process.env.OPPHUB_API_BASE || "https://api.opphub.ruiplus.cn";
 const TOKEN_FILE = join(homedir(), ".opphub-plugin/token.json");
 
 async function readToken() {
-  // v3.1.0-alpha.3 (维护者 14:20 红纸船): 走 plugin client proxy, 读 Keychain
   // 原代码直读 ~/.opphub-plugin/token.json (Linux fallback), mac 下永远是空 → 返 need_login
   try {
     return await pluginReadToken();

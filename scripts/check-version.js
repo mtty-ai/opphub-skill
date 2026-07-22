@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// scripts/check-version.js · v4.0.0-alpha.1
 //
 // P2-3 版本单一源 CI 检查
 //   单一源 = package.json version
@@ -33,7 +32,6 @@ function readVersion(path) {
     const m = raw.match(/^## Skill Version\(s\): <br>\n([\d.a-z-]+)/m);
     return m ? m[1].trim() : null;
   }
-  // bin/opphub: 找 `bin/opphub · v4.0.0-alpha.1` 注释行, strip `v` prefix
   if (path.endsWith("opphub") || path.endsWith(".sh")) {
     const m = raw.match(/^# bin\/opphub · (.+)$/m);
     return m ? m[1].trim().replace(/^v/, "") : null;

@@ -1,9 +1,7 @@
 #!/usr/bin/env node
-// bin/opphub-knowledge-add.js · v3.1.0-alpha.1
+// bin/opphub-knowledge-add.js · v4.0
 // status: implemented (单条入库, v3.1)
 //
-// 维护者 12:58 钉: 能力卡片改造 → 开放式知识库
-// 维护者 13:41 钉: 只到 skill 开放完, 不动 server schema
 //
 // 用法: bot 调
 //   opphub knowledge-add --raw-text "..." --source-type manual --json
@@ -23,7 +21,6 @@ const API_BASE = process.env.OPPHUB_API_BASE || "https://api.opphub.ruiplus.cn";
 const TOKEN_FILE = join(homedir(), ".opphub-plugin/token.json");
 
 async function getAccessToken() {
-  // v3.1.0-alpha.3 (维护者 14:20 红纸船): 走 plugin client proxy
   // 用 getAccessToken (不是 readToken) 让 plugin 自动 refresh 过期的 access_token
   // getAccessToken() 返回的是 access_token 字符串 (不是 {access_token} 对象),
   // 拋 NeedAuthorizationError 时 (plugin 不在, refresh_token 也过期) catch 返 null
@@ -104,7 +101,6 @@ async function main() {
     rawText = readFileSync(args.file, "utf8");
   }
 
-  // POST /api/user/knowledge/ingest (v3.1 维护者 16:54)
   // (server 端: 切片 + BGE-M3 embedding + tsvector 全文 + distilledTags)
   const url = `${API_BASE}/api/user/knowledge/ingest`;
   let resp;
@@ -137,7 +133,6 @@ async function main() {
         ok: false,
         error: "server_not_deployed",
         message: `server 返 ${resp.status}: /api/user/knowledge/ingest endpoint 未部署 (schema migration 没跑)`,
-        hint: "v3.1 endpoint 代码已就绪 (prisma/migrations/manual/20260717170000_v3.1_knowledge_entry.sql), 等维护者拍 ECS deploy",
       };
       if (wantJson) console.log(JSON.stringify(result, null, 2));
       process.exit(0);

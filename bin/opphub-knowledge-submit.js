@@ -2,15 +2,12 @@
 // bin/opphub-knowledge-submit.js · v3.3.0
 // status: implemented (v3.3 idempotent ingest + 冲突检测 + 软链覆盖)
 //
-// 维护者 7/20 17:30 拍: "skill 只负责数据收集, 数据的处理, 应该是服务器端来负责"
 //
 // 本 bin 职责:
-//   - 拿 cards.json (knowledge-card 输出 + 维护者修正版)
 //   - 算 idempotencyKey + contentHash (SHA256, skill 端算好给 server)
 //   - 调 server POST /api/knowledge/ingest v2 (idempotent)
 //   - 透传 4 种响应: created / no_change / soft_chain_override / conflict
 //
-// 不做 (维护者 17:30 钉的纪律):
 //   - 不做去重
 //   - 不做冲突判断
 //   - 不做版本管理
@@ -155,7 +152,6 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
     process.exit(1);
   }
 
-  // 2. 拿 token (v3.1.0-alpha.3 锁: 走 plugin client proxy)
   let accessToken;
   try {
     accessToken = MOCK_TOKEN || await pluginGetAccessToken();
@@ -182,7 +178,6 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
   //   - errors 不算 conflicts: 含 deployment_pending (server v2 endpoint 未接)
   //                              + network_error (网络挂)
   //                              + server_error (401/500/...)
-  //   bot 拿 errors 不让维护者拍 (不是 user 拍的事, 是 deploy / 网络的事)
   const results = { submitted: [], deduplicated: [], conflicts: [], errors: [] };
 
   for (const card of cards) {
@@ -217,7 +212,6 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
       httpStatus = resp.status;
       respData = await resp.json().catch(() => ({ ok: false, error: "bad_response", httpStatus }));
     } catch (e) {
-      // 网络错 → 归 errors (不是 conflict, bot 不该拿这个让维护者拍)
       results.errors.push({
         cardIndex,
         dimension,
@@ -231,7 +225,6 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
     }
 
     // A4 修: server 返 404/501 (endpoint 未接) → errors/deployment_pending
-    // 之前 v3.3 commit 把它归 conflicts, 让 bot 让维护者拍, 拍也没用 (server 没接)
     if (httpStatus === 404 || httpStatus === 501) {
       results.errors.push({
         cardIndex,
@@ -240,7 +233,6 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
         errorReport: {
           type: "deployment_pending",
           httpStatus,
-          message: `server 返 ${httpStatus}: /api/knowledge/ingest v2 endpoint 未部署, 等维护者拍 ECS deploy (7/15 钉: 本地 dev migrate, 等维护者拍才 deploy)`,
           hint: "v3.3 schema 已写, 等 server 接 v2 endpoint",
         },
       });
@@ -272,7 +264,6 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
         conflictReport: respData.conflictReport,
       });
     } else {
-      // 真错误 (401/500/...), 归 errors (不算 conflict, bot 拿这个不该让维护者拍)
       results.errors.push({
         cardIndex,
         dimension,
@@ -292,7 +283,6 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
     ok: results.errors.length === 0,
     okDetail: results.errors.length === 0
       ? null
-      : `有 ${results.errors.length} 条错误 (deployment_pending / network_error / server_error), 不是冲突, bot 不该拿这个让维护者拍`,
     opcId,
     summary: {
       submitted: results.submitted.length,
@@ -309,11 +299,9 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
     errors: results.errors,
     nextStep:
       results.errors.length > 0
-        ? `有 ${results.errors.length} 条 error (看 errors[]), deployment_pending 等维护者拍 ECS deploy, network/server_error 重跑`
         : results.conflicts.length > 0
         ? "用 bot.skillApi.askInteractive 让用户拍冲突项 (保留旧的/用新的/跳过)"
         : results.submitted.length > 0
-        ? "全部成功, 下一步跑 opphub knowledge-match --based-on-cards <cards.json> --json (v3.2-alpha.2 推荐姿势, 取代 --entry-ids)"
         : "全部 idempotent 命中, 无新 entry, 跑 knowledge-match 时用 deduplicated 里的 entryIds",
   };
 

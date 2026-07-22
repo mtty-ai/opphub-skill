@@ -2,10 +2,6 @@
 // bin/opphub-configure.js · v4.0.0
 // status: implemented (v4 通道 v4: 通道清单走 runtime, 默认通道走 server PATCH)
 //
-// 维护者 12:42 钉: plugin 端 opphub configure 功能可放 skill 里, 或 2 个都有
-// 维护者 12:47 钉: configure 完必须引导装 plugin
-// 维护者 13:28 钉: skill 不拼飞书 card, 走 OpenClaw runtime 渲染层
-// 维护者 13:41 钉: 只到 skill 开放完, 不动 server schema / runtime renderer
 //
 // v4.0.0 P0-5: 通道 v4 改造 (实测已符合, 无代码改动)
 //   - 通道清单 = OpenClaw runtime 真源, 走 `openclaw channels list --json` (不经 plugin)
@@ -38,16 +34,12 @@ const execp = promisify(execSync);
 const API_BASE = process.env.OPPHUB_API_BASE || "https://api.opphub.ruiplus.cn";
 
 async function readToken() {
-  // v3.1.0-alpha.3.4 (维护者 15:06 bug fix):
-  //   之前自实现读 ~/.opphub-plugin/token.json plain text, alpha.3 已把 token 迁到 Keychain,
   //   plain text 不存在 → readToken 永远 null → configure set 永远 need_login
-  //   修: 走 alpha.3 的 plugin client proxy (lib/opphub-plugin-client.js)
   const { readToken: proxyReadToken } = await import("../lib/opphub-plugin-client.js");
   return await proxyReadToken();
 }
 
 async function getChannelsViaOpenclawCli() {
-  // v3.1.0-alpha.3.4 (维护者 15:14 拍 "读取 openclaw 官方的 list"):
   //   之前调 `openclaw opphub channels` (plugin CLI), plugin runtime 不在就拿不到
   //   正解: 调 openclaw 官方 `openclaw channels list --json` (gateway 端, 不依赖 plugin)
   //
@@ -103,11 +95,9 @@ async function cmdList() {
     });
   }
 
-  // 2. v3.1.0-alpha.4.1 (维护者 7/17 16:58 拍 "skill 没显示选中通道"):
   //    合并 server 端 /api/user/channels/default 选中态
   //    原实现: isDefault: i === 0 (写死第一条), 没真查 server
   //    现实现: 调 getDefaultChannel() 拿 server 选中, 给对应那条打 isDefault: true
-  //    复用: lib/opphub-server-client.js (oauth-login alpha.4 16:31 抽出来的)
   const { getDefaultChannel } = await import("../lib/opphub-server-client.js");
   const defaultChannel = await getDefaultChannel();
   const selected = defaultChannel.selected; // { channelType, channelId, isDefault } | null
@@ -154,7 +144,6 @@ async function cmdSet({ channelType, channelId }) {
   }
 
   // 2. PATCH /api/user/channels/default
-  // 隐私: 不传 peer / open_id / 手机号 (7/9 21:23 钉)
   const url = `${API_BASE}/api/user/channels/default`;
   let resp;
   try {

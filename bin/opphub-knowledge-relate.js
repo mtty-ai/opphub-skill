@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-// bin/opphub-knowledge-relate.js · v3.2.0-alpha.2
+// bin/opphub-knowledge-relate.js · v4.0
 // status: implemented (v4 P1-5 列校验 + 金额解析增强 + 二进制 XLS 检测)
 //
-// 维护者 7/20 12:55 拍: 录入关联公司 (上游供应商 / 下游客户)
 //   输入: xls 合同清单 (HTML 格式导出, 跟 Excel 兼容)
 //   输出: cards[] 数组 (skill 6 阶段流程第 5 步可批量入库)
 //
@@ -20,7 +19,6 @@
 //   - 拆 cards: top N 客户/供应商 + 类别聚合
 //   - 输出 cards.json 给 ingest-batch 用
 //
-// v3.2-alpha.2 简化:
 //   - xls 解析只支持 HTML 格式 (file(1) 报 "HTML document text")
 //   - 睿驰公司名用 --company 传入, 自动容错匹配 (去掉括号/多主体/分公司)
 //   - 类别按公司名关键词 (传媒/科技/广告/集团/工作室/...)
@@ -28,7 +26,6 @@
 // 不做的事:
 //   - 不调 LLM (skill turn 的活, 不在本 bin)
 //   - 不入库 (阶段 5 才入库)
-//   - 不查 OPC 元数据 / 本机 plugin state (维护者 12:35 拍"不用了")
 
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -277,7 +274,6 @@ function aggregateCards(parsedData, company, options) {
         type: "downstream_category",
         dimension: "客户类别/未分类",
         emoji: "📂",
-        text: `${company} · 下游客户类别 · 未分类 (D1: 未撞中任何关键词的公司, top ${otherCompanies.length})\n\n关联客户数: ${otherDs.count} 家\n合同总金额: ¥${otherDs.total.toLocaleString("en-US", { maximumFractionDigits: 0 })}\n代表客户: ${otherCompanies.map(([n]) => n).join(", ")}\n\n(D1 补: 不准 "掉 other 里", 未撞中关键词的公司独立汇总, 维护者可手工拍补类目)`,
       });
     }
   }
@@ -292,7 +288,6 @@ function aggregateCards(parsedData, company, options) {
         type: "upstream_category",
         dimension: "供应商类别/未分类",
         emoji: "📂",
-        text: `${company} · 上游供应商类别 · 未分类 (D1: 未撞中任何关键词的公司, top ${otherCompanies.length})\n\n关联供应商数: ${otherUs.count} 家\n合同总金额: ¥${otherUs.total.toLocaleString("en-US", { maximumFractionDigits: 0 })}\n代表供应商: ${otherCompanies.map(([n]) => n).join(", ")}\n\n(D1 补: 不准 "掉 other 里", 未撞中关键词的公司独立汇总, 维护者可手工拍补类目)`,
       });
     }
   }
@@ -357,7 +352,6 @@ async function main() {
 
   // --help / -h: 打印用法, 不走 xls 解析
   if (args.help) {
-    console.log(`opphub-knowledge-relate · v3.2.0-alpha.2
 
 用途: 录入公司间的合作关系 (上下游), 不是公司本身的能力画像.
 场景: 传合同 xls (甲方/乙方/金额/项目), 拆出 top 客户 + top 供应商 + 类别聚合.
@@ -386,8 +380,6 @@ async function main() {
   }
 
 跟能力画像流程的区别:
-  能力画像 (v3.2 alpha.1): 答"这公司能做什么", 数据源 = LLM 联网
-  关联公司 (v3.2 alpha.2): 答"这公司跟谁合作", 数据源 = xls 合同清单
 
 下一步:
   opphub knowledge-ingest-batch --cards <cards.json> --json  # 批量入库
