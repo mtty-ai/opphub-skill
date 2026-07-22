@@ -52,8 +52,55 @@ function parseArgs(argv) {
   return args;
 }
 
+// v4.0.0-alpha.1 P1-5: 金额解析增强 (处理逗号/中文/括号负数/货币符号)
+// 中文复合单位: 5千万 = 5 × 千 × 万 = 5e7, 3.2万亿 = 3.2 × 万 × 亿 = 3.2e12
+function parseAmount(raw) {
+  if (raw == null) return 0;
+  let s = String(raw).trim();
+  if (!s) return 0;
+  // 括号负数: (100) → -100
+  let negative = false;
+  if (/^\(.*\)$/.test(s)) {
+    negative = true;
+    s = s.slice(1, -1);
+  }
+  // 中文金额: 拆 "数字 + 单位链" (e.g. "5千万" = 5 + 千 + 万)
+  const cnMatch = s.match(/^([\d,.]+)(.*)$/);
+  if (cnMatch) {
+    const numStr = cnMatch[1].replace(/,/g, "");
+    const rest = cnMatch[2] || "";
+    const num = parseFloat(numStr) || 0;
+    let mult = 1;
+    // 贪婪扫所有单位, 累乘 (千万 = 千 × 万 = 1e7, 万亿 = 万 × 亿 = 1e12)
+    if (/万/.test(rest)) mult *= 1e4;
+    if (/亿/.test(rest)) mult *= 1e8;
+    if (/仟|千/.test(rest)) mult *= 1e3;
+    if (/百/.test(rest)) mult *= 1e2;
+    if (mult > 1) {
+      const result = num * mult;
+      return negative ? -result : result;
+    }
+  }
+  // 普通数字: 去货币符号/空格/逗号
+  s = s.replace(/[¥$€£￥,\s]/g, "");
+  // 只留数字 + 小数点 + 负号
+  s = s.replace(/[^\d.\-]/g, "");
+  const num = parseFloat(s) || 0;
+  return negative ? -Math.abs(num) : num;
+}
+
 // 解析 xls (HTML 格式)
+// v4.0.0-alpha.1 P1-5: 二进制 XLS 检测
 function parseXlsHtml(html) {
+  // 检测二进制 xls (OLE2 签名: D0 CF 11 E0) — 我们的解析器只支持 HTML
+  // 避免 file(1) 报 "HTML document text" 但实际是 OLE2 时的误处理
+  if (/^[\x00-\x08\x0E-\x1F]/.test(html) || html.startsWith("<?xml")) {
+    // 二进制 / XML 不归本 bin, 提示 user 转 HTML 格式
+    const err = new Error("binary_or_xml_xls_not_supported");
+    err.code = "BINARY_XLS_NOT_SUPPORTED";
+    err.message = "本 bin 只支持 Excel \"另存为网页 (*.html)\" 格式, 不支持二进制 xls / xlsx";
+    throw err;
+  }
   const rows = html.match(/<tr>(.*?)<\/tr>/gs) || [];
   const data = [];
   for (const r of rows) {
@@ -139,6 +186,24 @@ function aggregateCards(parsedData, company, options) {
     amount: headers.findIndex((c) => c.includes("合同总金额")),
   };
 
+  // v4.0.0-alpha.1 P1-5: 必需列强校验
+  //   之前 colIdx=-1 时 row[-1]=undefined, 静默丢失合同关系和金额
+  //   修: 缺任一必需列直接返 missing_columns, 列出哪几列缺
+  const requiredCols = [
+    { key: "partyA", label: "甲方" },
+    { key: "partyB", label: "乙方" },
+    { key: "amount", label: "合同总金额" },
+  ];
+  const missingCols = requiredCols.filter((c) => colIdx[c.key] < 0);
+  if (missingCols.length > 0) {
+    const err = new Error("missing_columns");
+    err.code = "MISSING_COLUMNS";
+    err.message = `xls 缺必需列: ${missingCols.map((c) => c.label).join(", ")}`;
+    err.headers = headers;
+    err.missing = missingCols.map((c) => c.key);
+    throw err;
+  }
+
   // 扫数据
   const upstream = new Map(); // 供应商 -> 金额 sum
   const downstream = new Map(); // 客户 -> 金额 sum
@@ -151,8 +216,8 @@ function aggregateCards(parsedData, company, options) {
     if (row.length < Math.max(colIdx.partyA, colIdx.partyB, colIdx.amount) + 1) continue;
     const partyA = row[colIdx.partyA] || "";
     const partyB = row[colIdx.partyB] || "";
-    const amountStr = (row[colIdx.amount] || "0").replace(/[^\d.]/g, "");
-    const amount = parseFloat(amountStr) || 0;
+    // v4.0.0-alpha.1 P1-5: 改用增强 parseAmount (处理逗号/中文/括号负数/货币符号)
+    const amount = parseAmount(row[colIdx.amount]);
 
     const aIsCompany = isOurCompany(partyA, variants);
     const bIsCompany = isOurCompany(partyB, variants);
@@ -347,8 +412,36 @@ async function main() {
   }
 
   const t0 = Date.now();
-  const html = readFileSync(args.xls, "utf8");
-  const parsedData = parseXlsHtml(html);
+  let html, parsedData;
+  try {
+    html = readFileSync(args.xls, "utf8");
+    parsedData = parseXlsHtml(html);
+  } catch (e) {
+    // v4.0.0-alpha.1 P1-5: 二进制 XLS / 缺列 / 解析失败 返结构化错误
+    if (e.code === "BINARY_XLS_NOT_SUPPORTED") {
+      const result = {
+        ok: false,
+        error: "binary_xls_not_supported",
+        message: e.message,
+        hint: "在 Excel 里 \"另存为网页 (*.html)\" 再试, 不要传二进制 .xls",
+      };
+      if (wantJson) console.log(JSON.stringify(result, null, 2));
+      process.exit(1);
+    }
+    if (e.code === "MISSING_COLUMNS") {
+      const result = {
+        ok: false,
+        error: "missing_columns",
+        message: e.message,
+        headers: e.headers,
+        missing: e.missing,
+        hint: `xls 必需含 "甲方" "乙方" "合同总金额" 列 (大小写不敏感, 部分匹配), 缺: ${e.missing.join(", ")}`,
+      };
+      if (wantJson) console.log(JSON.stringify(result, null, 2));
+      process.exit(1);
+    }
+    throw e;
+  }
 
   if (parsedData.length === 0) {
     const result = { ok: false, error: "empty_xls", message: "xls 解析为空" };
@@ -356,10 +449,27 @@ async function main() {
     process.exit(1);
   }
 
-  const { cards, summary, upstream, downstream } = aggregateCards(parsedData, args.company, {
-    topCustomers: args.topCustomers,
-    topSuppliers: args.topSuppliers,
-  });
+  let cards, summary, upstream, downstream;
+  try {
+    ({ cards, summary, upstream, downstream } = aggregateCards(parsedData, args.company, {
+      topCustomers: args.topCustomers,
+      topSuppliers: args.topSuppliers,
+    }));
+  } catch (e) {
+    if (e.code === "MISSING_COLUMNS") {
+      const result = {
+        ok: false,
+        error: "missing_columns",
+        message: e.message,
+        headers: e.headers,
+        missing: e.missing,
+        hint: `xls 必需含 "甲方" "乙方" "合同总金额" 列, 缺: ${e.missing.join(", ")}`,
+      };
+      if (wantJson) console.log(JSON.stringify(result, null, 2));
+      process.exit(1);
+    }
+    throw e;
+  }
 
   const result = {
     ok: true,
