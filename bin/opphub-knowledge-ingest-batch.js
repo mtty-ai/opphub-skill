@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// bin/opphub-knowledge-ingest-batch.js · v4.0.0-alpha.1
+// bin/opphub-knowledge-ingest-batch.js · v4.0.0
 // status: implemented (v4 P1-3 mkdtemp + cleanup, 避免并发竞态)
 //
 // 舟哥 7/20 17:30 拍: "skill 只负责数据收集, 数据的处理, 应该是服务器端来负责"
@@ -8,7 +8,7 @@
 //   改成: 调 opphub-knowledge-submit (v3.3 新姿势, idempotent + 冲突检测)
 //   ingest-batch 退化成纯"编排入口" (one-shot submit a batch, 不做实际提交)
 //
-// v4.0.0-alpha.1 P1-3 改动: 临时文件改 mkdtemp 每次独立目录
+// v4.0.0 P1-3 改动: 临时文件改 mkdtemp 每次独立目录
 //   旧实现固定 /tmp/opphub-ingest-batch-cards.json, 并发 ingest 互相覆盖
 //   A 进程写 → B 进程覆盖 → A 的 submit 拿到 B 的 cards → 入库错乱
 //   修: mkdtemp 每次独立目录, 完成后 cleanup
@@ -139,7 +139,7 @@ async function main() {
     return;
   }
 
-  // v4.0.0-alpha.1 P1-3: 改 mkdtemp 每次独立目录 + cleanup
+  // v4.0.0 P1-3: 改 mkdtemp 每次独立目录 + cleanup
   // 旧实现固定 /tmp/opphub-ingest-batch-cards.json, 并发 ingest 互相覆盖
   // 修: 每次 mkdtempSync 创建独立目录, submit 完 rmSync 清理
   const tmpDir = args.cardsOut
@@ -165,7 +165,7 @@ async function main() {
       env: { ...process.env },  // 透传 env 让 submit 拿到 OPPHUB_API_BASE + MOCK_TOKEN (E2E mock / 真 server 都要)
     });
   } finally {
-    // v4.0.0-alpha.1 P1-3: cleanup 临时目录
+    // v4.0.0 P1-3: cleanup 临时目录
     //   不论 submit 成功失败, 都清, 避免残留公司能力信息
     //   --keep-tmp 跳过 cleanup (调试用)
     if (!args.keepTmp && !args.cardsOut) {

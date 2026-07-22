@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// bin/opphub-token-refresh.js · v4.0.0-alpha.1
+// bin/opphub-token-refresh.js · v4.0.0
 // status: implemented (v4 P0-3 refresh 返对象 + P1-8 错误结构化)
 //
 // 舟哥 14:21 拍: "代码都得改"
@@ -16,11 +16,11 @@
 //   - 同一 refreshLocks Map() per-opcId (plugin 内部)
 //   - 同一 REFRESH_AHEAD_MS = 5min buffer
 //
-// v4.0.0-alpha.1 P0-3: refreshToken 返完整 token 对象 (跟 readToken 一致)
+// v4.0.0 P0-3: refreshToken 返完整 token 对象 (跟 readToken 一致)
 //   之前 3 个 return 都返 string (access_token), 调 t2.expires_at 拿不到, 报 "Invalid time value"
 //   修: refreshToken() 统一返 { access_token, refresh_token, expires_at, ... }
 //
-// v4.0.0-alpha.1 P1-8: 改用 lib/error-format.js 统一错误结构
+// v4.0.0 P1-8: 改用 lib/error-format.js 统一错误结构
 //   旧: { ok:false, error:"...", message:"..." } 零散
 //   新: { ok:false, stage, code, retryable, hint, traceId } 结构化
 

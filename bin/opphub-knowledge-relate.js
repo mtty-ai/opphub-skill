@@ -53,7 +53,7 @@ function parseArgs(argv) {
   return args;
 }
 
-// v4.0.0-alpha.1 P1-5: 金额解析增强 (处理逗号/中文/括号负数/货币符号)
+// v4.0.0 P1-5: 金额解析增强 (处理逗号/中文/括号负数/货币符号)
 // 中文复合单位: 5千万 = 5 × 千 × 万 = 5e7, 3.2万亿 = 3.2 × 万 × 亿 = 3.2e12
 function parseAmount(raw) {
   if (raw == null) return 0;
@@ -91,7 +91,7 @@ function parseAmount(raw) {
 }
 
 // 解析 xls (HTML 格式)
-// v4.0.0-alpha.1 P1-5: 二进制 XLS 检测
+// v4.0.0 P1-5: 二进制 XLS 检测
 function parseXlsHtml(html) {
   // 检测二进制 xls (OLE2 签名: D0 CF 11 E0) — 我们的解析器只支持 HTML
   // 避免 file(1) 报 "HTML document text" 但实际是 OLE2 时的误处理
@@ -187,7 +187,7 @@ function aggregateCards(parsedData, company, options) {
     amount: headers.findIndex((c) => c.includes("合同总金额")),
   };
 
-  // v4.0.0-alpha.1 P1-5: 必需列强校验
+  // v4.0.0 P1-5: 必需列强校验
   //   之前 colIdx=-1 时 row[-1]=undefined, 静默丢失合同关系和金额
   //   修: 缺任一必需列直接返 missing_columns, 列出哪几列缺
   const requiredCols = [
@@ -217,7 +217,7 @@ function aggregateCards(parsedData, company, options) {
     if (row.length < Math.max(colIdx.partyA, colIdx.partyB, colIdx.amount) + 1) continue;
     const partyA = row[colIdx.partyA] || "";
     const partyB = row[colIdx.partyB] || "";
-    // v4.0.0-alpha.1 P1-5: 改用增强 parseAmount (处理逗号/中文/括号负数/货币符号)
+    // v4.0.0 P1-5: 改用增强 parseAmount (处理逗号/中文/括号负数/货币符号)
     const amount = parseAmount(row[colIdx.amount]);
 
     const aIsCompany = isOurCompany(partyA, variants);
@@ -418,7 +418,7 @@ async function main() {
     html = readFileSync(args.xls, "utf8");
     parsedData = parseXlsHtml(html);
   } catch (e) {
-    // v4.0.0-alpha.1 P1-5: 二进制 XLS / 缺列 / 解析失败 返结构化错误
+    // v4.0.0 P1-5: 二进制 XLS / 缺列 / 解析失败 返结构化错误
     if (e.code === "BINARY_XLS_NOT_SUPPORTED") {
       const result = {
         ok: false,

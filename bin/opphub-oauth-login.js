@@ -99,7 +99,7 @@ function err(code, message, extra = {}) {
   process.exit(1);
 }
 
-// === opener 跨平台 (v4.0.0-alpha.1 P0-2: spawn argv 避免 shell 注入 + 路径带空格失败) ===
+// === opener 跨平台 (v4.0.0 P0-2: spawn argv 避免 shell 注入 + 路径带空格失败) ===
 // 之前用 `open "${url}"` exec 字符串拼接, URL 含引号/特殊字符会注入, 安装目录带空格会失败
 async function openUrl(url) {
   const { spawn } = await import("node:child_process");
@@ -130,7 +130,7 @@ async function openUrl(url) {
 // startDeviceFlow: 拿 device_code + user_code + verification_url, 不 poll
 // pollDeviceFlow: 阻塞 poll 拿 access_token
 async function startDeviceFlow() {
-  // v4.0.0-alpha.1 P1-1: start 复用前置 (舟哥 7/20 14:01 拍的 bug fix 之前顺序错)
+  // v4.0.0 P1-1: start 复用前置 (舟哥 7/20 14:01 拍的 bug fix 之前顺序错)
   //   之前: 先请求 server 拿 device_code (老的被作废) → 后读 start state 检查复用
   //         复用逻辑永远不命中, 浪费 1 个 device_code
   //   修: 先读 start state, 命中复用就 return, 没命中再请求 server
@@ -253,7 +253,7 @@ async function pollDeviceFlow({ deviceCode, interval, expiresIn }) {
 
       // alpha.5: 登录后自动调 cron-setup (子进程, 幂等)
       // v3.1.0-alpha.2 (舟哥 14:06 poll bug fix): 用 path.dirname + path.join, 不依赖 ESM 变量
-      // v4.0.0-alpha.1 P0-2: 改 execFile argv 形式, 避免路径带空格 + shell 注入
+      // v4.0.0 P0-2: 改 execFile argv 形式, 避免路径带空格 + shell 注入
       const path = await import("node:path");
       const urlMod = await import("node:url");
       const __filename = urlMod.fileURLToPath(import.meta.url);
@@ -389,7 +389,7 @@ async function main() {
 
 
   // alpha.5: 查 opphub-skill-daily-check cron 是否装 + enabled + 上次跑
-  // v4.0.0-alpha.1 P0-2: 改 execFile argv 形式, 避免 shell 注入
+  // v4.0.0 P0-2: 改 execFile argv 形式, 避免 shell 注入
   async function getCronCheck() {
     try {
       const { stdout } = await execpFile("openclaw", ["cron", "list", "--json"]);
@@ -586,7 +586,7 @@ async function main() {
       const defaultChannel = await getDefaultChannel();
       // knowledge_status: 调 bin/opphub-knowledge-status (subprocess)
       // (v3.1.0-alpha.3 走 import.meta.url + 2 次 path.dirname 拿 skill 根 (不是 bin/))
-      // v4.0.0-alpha.1 P0-2: 改 execFile argv 形式, 避免路径带空格 + shell 注入
+      // v4.0.0 P0-2: 改 execFile argv 形式, 避免路径带空格 + shell 注入
       let knowledge = null;
       try {
         const _urlMod = await import("node:url");

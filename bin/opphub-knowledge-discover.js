@@ -80,14 +80,14 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const wantJson = args.json;
 
-  // v4.0.0-alpha.1 P1-4: 强校验 name + raw-text 必传
+  // v4.0.0 P1-4: 强校验 name + raw-text 必传
   //   之前: --name 缺也能跑 (会返 "未指定, 由 rawText 推断" 但 rawText 缺公司名会跑不下去)
   //   修: 两者必须同时传, --name 单独传走 query-plan 模式, --raw-text 单独传返 invalid_input
   if (!args.name) {
     const result = {
       ok: false,
       error: "missing_name",
-      message: "需要 --name \"公司名\" (必填, v4.0.0-alpha.1 P1-4 强校验)",
+      message: "需要 --name \"公司名\" (必填, v4.0.0 P1-4 强校验)",
     };
     if (wantJson) console.log(JSON.stringify(result, null, 2));
     process.exit(1);
@@ -128,7 +128,7 @@ async function main() {
     const result = {
       ok: validation.ok,
       mode: "raw-text-passthrough",
-      name: args.name,  // v4.0.0-alpha.1 P1-4: 必填, 不再是 "(未指定, 由 rawText 推断)"
+      name: args.name,  // v4.0.0 P1-4: 必填, 不再是 "(未指定, 由 rawText 推断)"
       rawText: args.rawText,
       sources: [
         { category: "passthrough", name: "bot_skill_turn", status: "received" },

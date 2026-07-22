@@ -2,7 +2,7 @@
 // bin/opphub-knowledge-autofill.js · DEPRECATED 2026-07-22
 // status: deprecated (v4 P0-1 入口移除, 本机敏感源违规, bin 留档返 deprecated JSON)
 //
-// v4.0.0-alpha.1 起: 入口已从 `bin/opphub` 移除, 本 bin 留档返 deprecated 状态。
+// v4.0.0 起: 入口已从 `bin/opphub` 移除, 本 bin 留档返 deprecated 状态。
 //
 // 弃用原因 (v4 spec §P0-3):
 //   - 旧实现读 token / IM channel / openclaw.json / outbox.log / SOUL.md / USER.md / MEMORY.md 等
@@ -32,7 +32,7 @@ out({
   removedAt,
   error: "deprecated",
   reason:
-    "knowledge-autofill 在 v4.0.0-alpha.1 弃用。读 token/channel/outbox/openclaw.json/MEMORY 等本机源违反产品红线, 私密数据不外发。",
+    "knowledge-autofill 在 v4.0.0 弃用。读 token/channel/outbox/openclaw.json/MEMORY 等本机源违反产品红线, 私密数据不外发。",
   replacement:
     "用 skill 端 LLM 工具 (web_search/web_fetch/image/pdf) + memory_search/wiki_search, 由用户显式确认后调 knowledge-add 入库。",
 });

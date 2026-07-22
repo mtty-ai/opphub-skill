@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// bin/opphub-knowledge-status.js · v4.0.0-alpha.1
+// bin/opphub-knowledge-status.js · v4.0.0
 // status: implemented (v4 P2-6: GET 改 v2 路径 /api/knowledge?opcId=...)
 //
 // 舟哥 12:58 钉: 能力卡片改造 → 开放式知识库, 不进结构化字段
 // 舟哥 13:41 钉: 只到 skill 开放完, 不动 server schema
 //
-// v4.0.0-alpha.1 P2-6: 路径统一 v2
+// v4.0.0 P2-6: 路径统一 v2
 //   旧: GET /api/user/knowledge/status
 //   新: GET /api/knowledge?opcId=...&entryType=...
 //   server 端 app/api/knowledge/route.ts 已支持 GET (实测, 7/22 舟哥拍)
@@ -53,7 +53,7 @@ async function main() {
     process.exit(1);
   }
 
-  // v4.0.0-alpha.1 P2-6: 改 v2 路径 GET /api/knowledge?opcId=...
+  // v4.0.0 P2-6: 改 v2 路径 GET /api/knowledge?opcId=...
   // (v3.1 旧路径 /api/user/knowledge/status 已被 v2 替代, server 端实测已支持)
   // opc_id 缺失 → 用 'me' alias (server 端 /api/knowledge/route.ts:21 支持)
   const opcIdParam = token.opc_id && token.opc_id.length > 0

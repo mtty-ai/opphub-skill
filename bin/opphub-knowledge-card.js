@@ -287,7 +287,7 @@ async function main() {
   //   - ambiguous: topTwo 两个选项 + askUser=true, bot 走 bot.skillApi.askInteractive 让舟哥拍
   //   - weak:      topOne = unknown, 仅跳问 "是哪类?", 给 5 个选项 (mcn/saas/law/mfg/unknown) 让舟哥拍
   //
-  // v4.0.0-alpha.1 P0-4: 歧义分支输出后立即 return, 不再继续 generateCards
+  // v4.0.0 P0-4: 歧义分支输出后立即 return, 不再继续 generateCards
   //   之前漏 return → INDUSTRY_TEMPLATES[industryCode='ambiguous'] fallback 到 'unknown'
   //   → 继续 generateCards → stdout 出 2 份 JSON (一份 ambiguity, 一份空 cards)
   //   → bot 拿 JSON.parse(stdout) 失败
@@ -336,7 +336,7 @@ async function main() {
       console.log(`🚫 ${name}: 行业无法可靠推断, 不准按模板拆 (返 askInteractive 让舟哥拍)`);
       console.log(JSON.stringify(result, null, 2));
     }
-    // v4.0.0-alpha.1 P0-4: 立即 return, 不再继续 generateCards 产生第 2 份 JSON
+    // v4.0.0 P0-4: 立即 return, 不再继续 generateCards 产生第 2 份 JSON
     return;
   }
 

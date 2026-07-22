@@ -1,13 +1,13 @@
 ---
 name: opphub
-version: 4.0.0-alpha.1
+version: 4.0.0
 description: 偶合 OppHub · OpenClaw bot skill · OPC 用户在 chat @bot 对话 · 走 device flow OAuth · 6 步闭环 + 开放式知识库 · 与 opphub-plugin 共 Keychain
 author: mtty-ai
 homepage: https://github.com/mtty-ai/opphub-skill
 entry: bin/opphub
 defaultLocale: zh-CN
 requires:
-  # v4.0.0-alpha.1 P2-2: frontmatter requires 完整声明
+  # v4.0.0 P2-2: frontmatter requires 完整声明
   # 之前 bins 只列 4 个, 缺 node/openclaw/security/spawn 等核心依赖, 安装器/runtime 报错模糊
   # 修复: 补全真实依赖 + 分平台 (macOS 需 security, Linux 需 openssl, Windows 暂不支持)
   bins:
@@ -454,7 +454,7 @@ v3.1 阶段（当前）：
 
 ---
 
-## 📦 bin 状态表 (v4.0.0-alpha.1 · 2026-07-22)
+## 📦 bin 状态表 (v4.0.0 · 2026-07-22)
 
 按 v4 spec §P2-5: 每个 bin 头加 `# status:` 标签, 状态枚举:
 
