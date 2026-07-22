@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // bin/opphub-knowledge-ingest-batch.js · v4.0.0-alpha.1
+// status: implemented (v4 P1-3 mkdtemp + cleanup, 避免并发竞态)
 //
 // 舟哥 7/20 17:30 拍: "skill 只负责数据收集, 数据的处理, 应该是服务器端来负责"
 //

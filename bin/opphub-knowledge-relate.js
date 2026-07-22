@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // bin/opphub-knowledge-relate.js · v3.2.0-alpha.2
+// status: implemented (v4 P1-5 列校验 + 金额解析增强 + 二进制 XLS 检测)
 //
 // 舟哥 7/20 12:55 拍: 录入关联公司 (上游供应商 / 下游客户)
 //   输入: xls 合同清单 (HTML 格式导出, 跟 Excel 兼容)

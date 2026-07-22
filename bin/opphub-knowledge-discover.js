@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // bin/opphub-knowledge-discover.js · v3.2.0-alpha.1
+// status: implemented (v4 P1-4 --name 强校验)
 //
 // 舟哥 7/20 12:31 拍 v3.1 引导流程 阶段 1
 //   bot 全自动查工商/业务/招聘/项目/memory/wiki

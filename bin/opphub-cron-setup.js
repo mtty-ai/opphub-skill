@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // opphub-cron-setup.js · v3.0.0-alpha.5
+// status: deprecated (v4 cron v3 起改 trigger plugin 写, peer 由 plugin 维护)
 //
 // 用途: 自动建 opphub-skill-daily-check cron 任务 (架构 B isolated + announce last)
 //       幂等: 重复跑不会重复建, 自动覆盖原 config

@@ -454,6 +454,40 @@ v3.1 阶段（当前）：
 
 ---
 
+## 📦 bin 状态表 (v4.0.0-alpha.1 · 2026-07-22)
+
+按 v4 spec §P2-5: 每个 bin 头加 `# status:` 标签, 状态枚举:
+
+| 状态 | 含义 |
+|---|---|
+| `implemented` | 已实现并稳定 |
+| `mock-only` | 仅 mock 协议测试 |
+| `server-dependent` | 依赖 server 端点 (server 不通则不可用) |
+| `stub` | 仅占位 stub, 实际不工作 |
+| `planned` | 设计稿定, 未开干 |
+| `deprecated` | 已弃用, 入口移除但 bin 留档 |
+
+| bin | 状态 | 备注 |
+|---|---|---|
+| `bin/opphub-configure.js` | ✅ implemented | v4 通道 v4 |
+| `bin/opphub-oauth-login.js` | ✅ implemented | v4 P1-1 + P0-2 |
+| `bin/opphub-token-refresh.js` | ✅ implemented | v4 P0-3 + P1-8 |
+| `bin/opphub-check-update.js` | ✅ implemented | 远端版本比对 |
+| `bin/opphub-plugin-check.js` | ✅ implemented | plugin 探测 |
+| `bin/opphub-knowledge-add.js` | ✅ implemented | 单条入库 |
+| `bin/opphub-knowledge-status.js` | ✅ implemented | 状态查询 |
+| `bin/opphub-knowledge-search.js` | ✅ implemented | 向量召回 |
+| `bin/opphub-knowledge-discover.js` | ✅ implemented | v4 P1-4 name 强校验 |
+| `bin/opphub-knowledge-card.js` | ✅ implemented | v4 P0-4 歧义 return |
+| `bin/opphub-knowledge-submit.js` | ✅ implemented | v3.3 idempotent |
+| `bin/opphub-knowledge-ingest-batch.js` | ✅ implemented | v4 P1-3 mkdtemp |
+| `bin/opphub-knowledge-match.js` | ✅ implemented | 关联匹配 |
+| `bin/opphub-knowledge-relate.js` | ✅ implemented | v4 P1-5 列校验 + 金额解析 |
+| `bin/opphub-knowledge-autofill.js` | ⚠️ deprecated | v4 P0-1 入口移除 |
+| `bin/opphub-cron-setup.js` | ⚠️ deprecated | v4 cron v3 起改 trigger plugin |
+
+---
+
 ## 🤝 录入关联公司 (v3.2 alpha.2 · 7/20 12:55 拍)
 
 > **用途**：录入公司间的合作关系（上下游），不是公司本身的能力画像。

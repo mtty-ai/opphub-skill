@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // bin/opphub-configure.js · v4.0.0-alpha.1
+// status: implemented (v4 通道 v4: 通道清单走 runtime, 默认通道走 server PATCH)
 //
 // 舟哥 12:42 钉: plugin 端 opphub configure 功能可放 skill 里, 或 2 个都有
 // 舟哥 12:47 钉: configure 完必须引导装 plugin

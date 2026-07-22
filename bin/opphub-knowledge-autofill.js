@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // bin/opphub-knowledge-autofill.js · DEPRECATED 2026-07-22
+// status: deprecated (v4 P0-1 入口移除, 本机敏感源违规, bin 留档返 deprecated JSON)
 //
 // v4.0.0-alpha.1 起: 入口已从 `bin/opphub` 移除, 本 bin 留档返 deprecated 状态。
 //

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // bin/opphub-knowledge-add.js · v3.1.0-alpha.1
+// status: implemented (单条入库, v3.1)
 //
 // 舟哥 12:58 钉: 能力卡片改造 → 开放式知识库
 // 舟哥 13:41 钉: 只到 skill 开放完, 不动 server schema

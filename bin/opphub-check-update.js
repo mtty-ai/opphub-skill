@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // opphub-check-update.js · v3.0.0-alpha.6.1.5
+// status: implemented (远端版本比对)
 //
 // 用途: 检查 skill 自身是否有新版本 (供 plugin 调用)
 // alpha.5 占位, alpha.6 实跑 clawhub inspect

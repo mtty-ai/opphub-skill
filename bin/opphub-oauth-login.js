@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // opphub-oauth-login.js · v3.0.0-alpha.1
+// status: implemented (v4 P1-1 start 复用前置 + P0-2 spawn argv)
 //
 // 用途: OPC 用户在 OpenClaw chat 里 @bot 说"偶合登录",bot 调这个脚本走 OAuth Device Flow,
 //       拿 access_token + refresh_token → 写 macOS Keychain / Linux AES-256-GCM 加密文件

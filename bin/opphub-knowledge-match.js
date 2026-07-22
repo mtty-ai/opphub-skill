@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // bin/opphub-knowledge-match.js · v3.2.0-alpha.2
+// status: implemented (关联匹配, v3.2)
 //
 // 舟哥 7/20 12:31 拍 v3.1 引导流程 阶段 6
 //   入库完跑 1 次撮合匹配 (上下游 + 同业)

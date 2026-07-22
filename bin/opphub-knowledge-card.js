@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // bin/opphub-knowledge-card.js · v3.2.0-alpha.2
+// status: implemented (v4 P0-4 歧义分支必 return, 避免双 JSON 输出)
 //
 // 舟哥 7/20 12:31 拍 v3.1 引导流程 阶段 2 + 3
 //   行业推断 (按工商/招聘关键词)

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // bin/opphub-knowledge-submit.js · v3.3.0
+// status: implemented (v3.3 idempotent ingest + 冲突检测 + 软链覆盖)
 //
 // 舟哥 7/20 17:30 拍: "skill 只负责数据收集, 数据的处理, 应该是服务器端来负责"
 //

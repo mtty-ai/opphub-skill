@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // bin/opphub-plugin-check.js · v3.1.0-alpha.1
+// status: implemented (plugin 探测, v3.1)
 //
 // 舟哥 12:47 钉: configure 完必须引导装 plugin, 不引导 = 配置是空的
 // 舟哥 13:41 钉: 只到 skill 开放完, 不动 server schema / runtime renderer

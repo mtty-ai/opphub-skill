@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // bin/opphub-knowledge-search.js · v3.1.0-alpha.1
+// status: implemented (向量召回, v3.1)
 //
 // 舟哥 7/17 16:31 拍 Q5=A: similarity + 全文独立 endpoint
 // 舟哥 7/20 12:12 拍: server 加 minScore 阈值过滤 (防 nomic-embed-text 短 query 幻觉)
