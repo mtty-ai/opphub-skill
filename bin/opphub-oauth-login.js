@@ -18,7 +18,7 @@
 // v3.1.0-alpha.3 (舟哥 14:21 拍 "代码都得改"):
 //   skill 不再双源重写 readToken/writeToken/keychain.
 //   改 import plugin client (lib/opphub-plugin-client.js) → plugin = source of truth
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFileSync, existsSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -35,6 +35,7 @@ import {
 } from "../lib/opphub-plugin-client.js";
 
 const execp = promisify(exec);
+const execpFile = promisify(execFile);
 
 // === 配置 ===
 const AUTHORIZE_URL = "https://api.opphub.ruiplus.cn/api/oauth/device/code";
@@ -97,15 +98,22 @@ function err(code, message, extra = {}) {
   process.exit(1);
 }
 
-// === opener 跨平台 ===
+// === opener 跨平台 (v4.0.0-alpha.1 P0-2: spawn argv 避免 shell 注入 + 路径带空格失败) ===
+// 之前用 `open "${url}"` exec 字符串拼接, URL 含引号/特殊字符会注入, 安装目录带空格会失败
 async function openUrl(url) {
+  const { spawn } = await import("node:child_process");
   const platform = process.platform;
-  const cmd =
-    platform === "darwin" ? `open "${url}"`
-    : platform === "win32" ? `start "" "${url}"`
-    : `xdg-open "${url}"`;
+  let cmd, args;
+  if (platform === "darwin") {
+    cmd = "open"; args = [url];
+  } else if (platform === "win32") {
+    cmd = "cmd"; args = ["/c", "start", "", url];
+  } else {
+    cmd = "xdg-open"; args = [url];
+  }
   try {
-    await execp(cmd);
+    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+    child.unref();
     return true;
   } catch {
     return false;
@@ -243,6 +251,7 @@ async function pollDeviceFlow({ deviceCode, interval, expiresIn }) {
 
       // alpha.5: 登录后自动调 cron-setup (子进程, 幂等)
       // v3.1.0-alpha.2 (舟哥 14:06 poll bug fix): 用 path.dirname + path.join, 不依赖 ESM 变量
+      // v4.0.0-alpha.1 P0-2: 改 execFile argv 形式, 避免路径带空格 + shell 注入
       const path = await import("node:path");
       const urlMod = await import("node:url");
       const __filename = urlMod.fileURLToPath(import.meta.url);
@@ -250,7 +259,7 @@ async function pollDeviceFlow({ deviceCode, interval, expiresIn }) {
       // alpha.5: 登录后自动调 cron-setup (子进程, 幂等), 从 alpha.7 抄回来 (v3.1.0-alpha.1 漏定义)
       async function runCronSetup() {
         try {
-          const { stdout } = await execp(`node ${join(__skillDir, "bin/opphub-cron-setup.js")} setup`);
+          const { stdout } = await execpFile("node", [join(__skillDir, "bin/opphub-cron-setup.js"), "setup"]);
           try {
             const objStart = stdout.indexOf("{");
             if (objStart >= 0) return JSON.parse(stdout.slice(objStart));
@@ -378,9 +387,10 @@ async function main() {
 
 
   // alpha.5: 查 opphub-skill-daily-check cron 是否装 + enabled + 上次跑
+  // v4.0.0-alpha.1 P0-2: 改 execFile argv 形式, 避免 shell 注入
   async function getCronCheck() {
     try {
-      const { stdout } = await execp('openclaw cron list --json 2>/dev/null');
+      const { stdout } = await execpFile("openclaw", ["cron", "list", "--json"]);
       // openclaw 输出 {"jobs": [...]} 而且 warnings 在前, 从 { 开始拿
       const objStart = stdout.indexOf('{');
       const obj = JSON.parse(stdout.slice(objStart));
@@ -574,13 +584,14 @@ async function main() {
       const defaultChannel = await getDefaultChannel();
       // knowledge_status: 调 bin/opphub-knowledge-status (subprocess)
       // (v3.1.0-alpha.3 走 import.meta.url + 2 次 path.dirname 拿 skill 根 (不是 bin/))
+      // v4.0.0-alpha.1 P0-2: 改 execFile argv 形式, 避免路径带空格 + shell 注入
       let knowledge = null;
       try {
         const _urlMod = await import("node:url");
         const _pathMod = await import("node:path");
         const _filePath = _urlMod.fileURLToPath(import.meta.url);
         const _skillDir = _pathMod.dirname(_pathMod.dirname(_filePath));
-        const { stdout: kStdout } = await execp(`node ${join(_skillDir, "bin/opphub-knowledge-status.js")} --json`);
+        const { stdout: kStdout } = await execpFile("node", [join(_skillDir, "bin/opphub-knowledge-status.js"), "--json"]);
         const kObjStart = kStdout.indexOf("{");
         if (kObjStart >= 0) knowledge = JSON.parse(kStdout.slice(kObjStart));
       } catch {}
