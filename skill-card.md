@@ -38,7 +38,7 @@ Mitigation: Avoid debug modes that print credentials and review command output b
 **Other Properties Related to Output:** [Uses OAuth device flow and persistent local token storage shared with the OppHub plugin.] <br>
 
 ## Skill Version(s): <br>
-4.0.6 (source: package.json) <br>
+4.0.7 (source: package.json) <br>
 
 ## Ethical Considerations: <br>
 Users should evaluate whether this skill is appropriate for their environment, review any generated or modified files before relying on them, and apply their organization's safety, security, and compliance requirements before deployment. <br>

@@ -1,6 +1,6 @@
 ---
 name: opphub
-version: 4.0.6
+version: 4.0.7
 description: 偶合 OppHub - 把偶合账号接入 OpenClaw，录入公司、查商机、收推送。
 author: mtty-ai
 homepage: https://github.com/mtty-ai/opphub-skill
