@@ -1,11 +1,16 @@
 #!/usr/bin/env node
-// bin/opphub-knowledge-ingest-batch.js · v3.3.0
+// bin/opphub-knowledge-ingest-batch.js · v4.0.0-alpha.1
 //
 // 舟哥 7/20 17:30 拍: "skill 只负责数据收集, 数据的处理, 应该是服务器端来负责"
 //
 // v3.3.0 改动: 不再循环调 knowledge-add (v3.2 旧姿势)
 //   改成: 调 opphub-knowledge-submit (v3.3 新姿势, idempotent + 冲突检测)
 //   ingest-batch 退化成纯"编排入口" (one-shot submit a batch, 不做实际提交)
+//
+// v4.0.0-alpha.1 P1-3 改动: 临时文件改 mkdtemp 每次独立目录
+//   旧实现固定 /tmp/opphub-ingest-batch-cards.json, 并发 ingest 互相覆盖
+//   A 进程写 → B 进程覆盖 → A 的 submit 拿到 B 的 cards → 入库错乱
+//   修: mkdtemp 每次独立目录, 完成后 cleanup
 //
 // 返 { ok, mode, total, submitted, deduplicated, conflicts, summary, nextStep }
 //
@@ -24,10 +29,10 @@
 //   - 不调 LLM (skill turn 的活)
 //   - 不入库 OPC 元数据 / 通道列表 / token (舟哥 12:35 拍)
 
-import { readFileSync, existsSync, writeFileSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -44,6 +49,7 @@ function parseArgs(argv) {
     else if (a === "--cards-out") args.cardsOut = argv[++i];
     else if (a === "--dry-run") args.dryRun = true;
     else if (a === "--force-override-conflict") args.forceOverrideConflict = true;
+    else if (a === "--keep-tmp") args.keepTmp = true;  // v4 调试用, 默认 cleanup
     else if (!a.startsWith("--")) args._.push(a);
   }
   return args;
@@ -132,25 +138,39 @@ async function main() {
     return;
   }
 
-  // v3.3.0 改动: 调 submit, 不再循环调 add
-  // 把 cards 写到 cards.json 给 submit 读
-  const cardsJsonPath = args.cardsOut || "/tmp/opphub-ingest-batch-cards.json";
-  writeFileSync(cardsJsonPath, JSON.stringify(cardsData, null, 2));
+  // v4.0.0-alpha.1 P1-3: 改 mkdtemp 每次独立目录 + cleanup
+  // 旧实现固定 /tmp/opphub-ingest-batch-cards.json, 并发 ingest 互相覆盖
+  // 修: 每次 mkdtempSync 创建独立目录, submit 完 rmSync 清理
+  const tmpDir = args.cardsOut
+    ? dirname(args.cardsOut)
+    : mkdtempSync(join(tmpdir(), "opphub-ingest-batch-"));
+  const tmpCards = args.cardsOut || join(tmpDir, "cards.json");
+  writeFileSync(tmpCards, JSON.stringify(cardsData, null, 2));
 
   const submitArgs = [
     SUBMIT_BIN,
-    "--cards", cardsJsonPath,
+    "--cards", tmpCards,
     "--json",
   ];
   if (args.forceOverrideConflict) {
     submitArgs.push("--force-override-conflict");
   }
 
-  const res = spawnSync("node", submitArgs, {
-    encoding: "utf8",
-    timeout: 120_000,
-    env: { ...process.env },  // 透传 env 让 submit 拿到 OPPHUB_API_BASE + MOCK_TOKEN (E2E mock / 真 server 都要)
-  });
+  let res;
+  try {
+    res = spawnSync("node", submitArgs, {
+      encoding: "utf8",
+      timeout: 120_000,
+      env: { ...process.env },  // 透传 env 让 submit 拿到 OPPHUB_API_BASE + MOCK_TOKEN (E2E mock / 真 server 都要)
+    });
+  } finally {
+    // v4.0.0-alpha.1 P1-3: cleanup 临时目录
+    //   不论 submit 成功失败, 都清, 避免残留公司能力信息
+    //   --keep-tmp 跳过 cleanup (调试用)
+    if (!args.keepTmp && !args.cardsOut) {
+      try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    }
+  }
 
   if (res.error) {
     const result = {
