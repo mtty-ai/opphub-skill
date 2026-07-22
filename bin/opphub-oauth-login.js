@@ -290,6 +290,7 @@ async function pollDeviceFlow({ deviceCode, interval, expiresIn }) {
     if (data.error === "slow_down") { pollInterval += 5000; continue; }
     if (data.error === "expired_token") {
       clearStartState();
+      err("device_flow_expired", "device flow 超时 (请重新跑 login-start)", {
         next_steps: { bot_prompt: "@bot 重新跑偶合登陆" },
       });
     }
@@ -428,6 +429,22 @@ async function main() {
     //      不是 server 团队活, 是 skill 端没去查
     const defaultChannel = await getDefaultChannel();
 
+    let knowledgeStatus = { entries: 0, lastKnowledgeAt: null };
+    try {
+      const { fileURLToPath } = await import("node:url");
+      const { dirname } = await import("node:path");
+      const skillDir = dirname(dirname(fileURLToPath(import.meta.url)));
+      const { stdout: kStdout } = await execpFile("node", [join(skillDir, "bin/opphub-knowledge-status.js"), "--json"]);
+      const kObjStart = kStdout.indexOf("{");
+      if (kObjStart >= 0) {
+        const k = JSON.parse(kStdout.slice(kObjStart));
+        knowledgeStatus = {
+          entries: k.knowledgeCount ?? k.entries?.length ?? 0,
+          lastKnowledgeAt: k.lastKnowledgeAt ?? null,
+        };
+      }
+    } catch {}
+
     out({
       ok: true,
       status: s,
@@ -448,10 +465,7 @@ async function main() {
           : "plugin 未装 · 推送走 skill 自带 cron(每天 09:00 检查 skill 版本, 不查撮合)",
       },
       cron_check: await getCronCheck(),
-      knowledge_status: {
-        entries: 0,           // 后续调 bin/opphub-knowledge-status 填 (server 端 GET /api/knowledge)
-        lastKnowledgeAt: null,
-      },
+      knowledge_status: knowledgeStatus,
       link_health: {
         ws_connected: false,  // 待 plugin v0.6.x 上报 server ws 状态后填
         cron_ok: null,

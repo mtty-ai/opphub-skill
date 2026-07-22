@@ -282,6 +282,7 @@ async function main() {
         delivery: cronAddResult.delivery,
         hint: cronAddResult.delivery.source === "server"
           ? "cron 每天 09:00 跑 check-update, 推送到 server 给的 defaultChannel"
+          : "cron 每天 09:00 跑 check-update, fallback 到本地 defaultChannel",
       });
       return;
     } catch (e) {

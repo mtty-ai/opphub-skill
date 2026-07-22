@@ -194,7 +194,7 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
     let respData;
     let httpStatus = 0;
     try {
-      const resp = await fetch(`${API_BASE}/api/knowledge/ingest`, {
+      const resp = await fetch(`${API_BASE}/api/user/knowledge/ingest`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${accessToken}`,
@@ -203,6 +203,7 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
         body: JSON.stringify({
           opcId,
           rawText: text,
+          sourceType: "auto",
           entryType: type,
           entryDimension: dimension,
           idempotencyKey,
@@ -284,6 +285,7 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
     ok: results.errors.length === 0,
     okDetail: results.errors.length === 0
       ? null
+      : "部分卡片提交失败",
     opcId,
     summary: {
       submitted: results.submitted.length,
@@ -300,9 +302,11 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
     errors: results.errors,
     nextStep:
       results.errors.length > 0
+        ? "有错误, fix and retry"
         : results.conflicts.length > 0
         ? "用 bot.skillApi.askInteractive 让用户拍冲突项 (保留旧的/用新的/跳过)"
         : results.submitted.length > 0
+        ? "知识已入库, 跑 knowledge-match 做上下游关联"
         : "全部 idempotent 命中, 无新 entry, 跑 knowledge-match 时用 deduplicated 里的 entryIds",
   };
 

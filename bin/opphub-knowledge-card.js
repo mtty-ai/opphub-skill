@@ -299,6 +299,8 @@ async function main() {
       ok: false,
       error: industryCode === "ambiguous" ? "industry_ambiguous" : "industry_weak_evidence",
       message: industryCode === "ambiguous"
+        ? "rawText 多行业信号撞同分, skill 不准 pick one — 需维护者拍实际行业"
+        : "rawText 行业信号太弱 (顶分<=1), skill 不准猜 — 需维护者拍行业",
       name,
       industry: { state: industryState, scores: industryScores, topTwo },
       cards: [],

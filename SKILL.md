@@ -1,6 +1,6 @@
 ---
 name: opphub
-version: 4.0.7
+version: 4.0.8
 description: 偶合 OppHub - 把偶合账号接入 OpenClaw，录入公司、查商机、收推送。
 author: mtty-ai
 homepage: https://github.com/mtty-ai/opphub-skill
@@ -63,27 +63,40 @@ openclaw plugins install clawhub:@mtty-ai/opphub
 - `opphub` skill：在 IM 里跟 bot 对话
 - `opphub` plugin：装好后 bot 收得到推送，登录态写 macOS Keychain
 
-装完自动重启 gateway，`opphub plugin-check --json` 应该返回 `installed: true`。
+装完自动重启 gateway。
 
 依赖 runtime 自动校验，不缺。
 
 ---
 
-## 三步上手
+## 五步上手
 
 ### 1. 注册偶合账号
 
-打开 [偶合 App](https://api.opphub.ruiplus.cn/activate?signup=1) 或网页 `/activate`，邮箱/手机号 + 验证码注册。
+去 <https://api.opphub.ruiplus.cn/register>，邮箱/手机号 + 6 位验证码。
 
-### 2. @bot 说"偶合登录"
+### 2. 验证 plugin 装好
 
-bot 会：
+```bash
+opphub plugin-check --json
+```
 
-1. 生成一对验证码 + 链接（私聊发给你，不在群里贴）
-2. 你打开链接点同意
-3. 登录态写进 Keychain，下次不用再登
+返 `installed: true` 就 OK。没装好跑 `openclaw plugins install clawhub:@mtty-ai/opphub` 重装。
 
-### 3. @bot 说"偶合录入 [公司名]"
+### 3. @bot 说"偶合登录"
+
+bot 走 OAuth device flow：
+- bot 私聊发你激活链接（不会在群里贴验证码）
+- 你打开链接点同意
+- 登录态自动写 Keychain，下次不用再登
+
+### 4. @bot 说"偶合配置"
+
+bot 列出你本机已装的 IM 通道（飞书/微信/钉钉/Telegram 等），你选一个作**默认推送通道**。后续商机推送、cron 提醒都走这个通道。
+
+跳过这步也行——bot 会用 server 端上次选的通道；不放心就先跑一次确认。
+
+### 5. @bot 说"偶合录入 [公司名]"
 
 bot 自动 6 步跑完，只问你一次"是否入库"：
 

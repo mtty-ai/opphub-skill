@@ -352,6 +352,7 @@ async function main() {
 
   // --help / -h: 打印用法, 不走 xls 解析
   if (args.help) {
+    console.log(`
 
 用途: 录入公司间的合作关系 (上下游), 不是公司本身的能力画像.
 场景: 传合同 xls (甲方/乙方/金额/项目), 拆出 top 客户 + top 供应商 + 类别聚合.
