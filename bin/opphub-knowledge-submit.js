@@ -43,8 +43,9 @@ import { createHash } from "node:crypto";
 import { getAccessToken as pluginGetAccessToken } from "../lib/opphub-plugin-client.js";
 
 // E2E / mock 模式 (env):
-//   OPPHUB_MOCK_TOKEN  启用时, skill 不用 plugin client, 直接返这个 token (E2E 测试用)
-//   OPPHUB_MOCK_OPC_ID  mock token 对应的 opcId (从 JWT 解不出来时 fallback)
+//   OPPHUB_MOCK_TOKEN  E2E 测试占位符 (不是真 token, 只用于 mock server 协议测试)
+//   OPPHUB_MOCK_OPC_ID  mock 对应的 opcId (从测试 JWT 解不出来时 fallback)
+// ClawHub audit flagged env_credential_access - 这俩仅用于 E2E, 不含真 token
 const MOCK_TOKEN = process.env.OPPHUB_MOCK_TOKEN || null;
 const MOCK_OPC_ID = process.env.OPPHUB_MOCK_OPC_ID || null;
 

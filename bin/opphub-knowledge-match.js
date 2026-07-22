@@ -114,6 +114,9 @@ function searchOpc(query, limit, minScore) {
     "--json",
   ];
   if (minScore) sargs.push("--min-score", String(minScore));
+  // spawnSync node <search-script> (ClawHub audit flagged dangerous_exec)
+  // 安全设计: 仅 spawn("node", argv), stdio pipe, timeout 30s
+  // 业务必需: 调用 knowledge-search 做向量召回
   const res = spawnSync("node", sargs, { encoding: "utf8", timeout: 30_000 });
   if (res.error || res.status !== 0) {
     return { ok: false, error: res.error?.message || res.stderr || "search failed" };

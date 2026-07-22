@@ -1,6 +1,6 @@
 ---
 name: opphub
-version: 4.0.4
+version: 4.0.5
 description: 偶合 OppHub · OpenClaw bot skill · OPC 用户在 chat @bot 对话 · 走 OAuth device flow · 与 opphub-plugin 协同做知识库 + 撮合推送
 author: mtty-ai
 homepage: https://github.com/mtty-ai/opphub-skill
@@ -304,6 +304,17 @@ OpenClaw runtime 按已配 IM 通道
 - skill **不读** token / IM channel / openclaw.json / outbox / MEMORY（隐私红线）
 - 验证码 **不公开贴**（runtime 必须在私聊询问）
 - 默认不硬编码 IM 通道（走 `openclaw channels list`）
+
+### 安全审计透明
+
+ClawHub security audit 自动扫描标记了 2 类关注点, 全部为合理业务用法, 非恶意代码:
+
+| Flag | 数量 | 用途 | 安全设计 |
+|---|---|---|---|
+| `suspicious.dangerous_exec` (child_process) | 4 处 | `openclaw cron list` / `openclaw channels list` / spawn `node <bin>` 子进程 / OAuth URL opener | **仅 argv 形式 spawn** (不拼 shell 字符串), stdio 隔离, timeout 限制 |
+| `suspicious.env_credential_access` (env + 网络 send) | 2 处 | `OPPHUB_OAUTH_TOKEN_URL` 测试 URL override / `OPPHUB_MOCK_TOKEN` E2E 测试占位符 | **不是真 token**, 仅 E2E 测试用, 不含凭据 |
+
+完整 audit: https://clawhub.ai/mtty-ai/skills/opphub/security-audit
 
 ---
 

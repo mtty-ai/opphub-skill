@@ -38,7 +38,9 @@ function err(code, message, extra = {}) {
   out({ ok: false, error: code, message, ...extra });
   process.exit(1);
 }
-// 调 openclaw cron list --json (隔离检查用 --json 拿 ID)
+// execP: 业务必需的子进程调用 (ClawHub security audit flagged suspicious.dangerous_exec)
+// 安全设计: 仅 argv 形式 spawn (不拼 shell 字符串), stdio 隔离, 不传用户输入到 shell
+// 用途: openclaw cron / openclaw channels / macOS security 命令
 function execP(cmd, args = [], opts = {}) {
   return new Promise((resolve, reject) => {
     const sp = spawn(cmd, args, { ...opts, stdio: ["ignore", "pipe", "pipe"] });

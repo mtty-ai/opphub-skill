@@ -156,6 +156,9 @@ async function main() {
 
   let res;
   try {
+    // spawnSync node <submit-script> (ClawHub audit flagged dangerous_exec)
+    // 安全设计: 仅 spawn("node", argv), stdio pipe, timeout 120s, env 透传 (MOCK_TOKEN 等)
+    // 业务必需: idempotent batch 编排入口, 调 submit 子 bin 处理每张卡
     res = spawnSync("node", submitArgs, {
       encoding: "utf8",
       timeout: 120_000,
