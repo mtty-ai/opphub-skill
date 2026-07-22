@@ -1,32 +1,43 @@
 #!/usr/bin/env node
-// bin/opphub-knowledge-autofill.js · v3.1.0-alpha.1
+// bin/opphub-knowledge-autofill.js · DEPRECATED 2026-07-22
 //
-// 舟哥 12:58 钉: 能力卡片改造 → 开放式知识库
-// 舟哥 13:15 钉: skill 调 LLM 工具 + 联网补足
-// 舟哥 13:18 钉: skill 读取分析本机 OpenClaw memory
-// 舟哥 13:41 钉: 只到 skill 开放完, 不动 server schema / runtime renderer
+// v4.0.0-alpha.1 起: 入口已从 `bin/opphub` 移除, 本 bin 留档返 deprecated 状态。
+//
+// 弃用原因 (v4 spec §P0-3):
+//   - 旧实现读 token / IM channel / openclaw.json / outbox.log / SOUL.md / USER.md / MEMORY.md 等
+//     12+ 个本机敏感源, 拼成 rawText 走 server 入库, 违反产品红线 (私密数据不外发)
+//   - v4 通道架构: 知识库录入 = skill 拼 rawText, 不读本机状态/配置/memory
+//   - 替代: skill 端用 OpenClaw runtime LLM 工具 (web_search/web_fetch/image/pdf) +
+//     memory_search/wiki_search 由 user 显式确认后再调 knowledge-add 入库
 //
 // 用法: bot 调 `opphub knowledge-autofill --json`
-// 拉 15 源拼成一段 rawText, 返给 skill 让 skill 用 bot.skillApi.askInteractive 让用户确认
-//
-// 15 源 = 6 本机 + 5 memory/wiki + 4 LLM/联网
-// 注: LLM/联网 + memory 调是 OpenClaw runtime 注入的 skillApi (skill turn 内能调)
-//     本 bin 只负责"拼骨架 + 列出哪些源被拉了", 真正调 LLM/memory 由 skill turn 完成
-//
-// 返 { ok, rawText, sourcesUsed: [{category, name, status}] }
-// skill 拿到后:
-//   1. 出 IntentMessage (channel-agnostic) 让用户确认 / 改一下 / 跳过
-//   2. 用户确认 → skill 调 bin/opphub-knowledge-add 把 rawText 入库
+// 返: { ok:false, deprecated:true, removedAt:'2026-07-22', reason, replacement }
+//     exit 0 (deprecation 不算错, 留档让存量调用方知所进退)
 
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
+const removedAt = "2026-07-22";
 
-const HOME = homedir();
-const API_BASE = process.env.OPPHUB_API_BASE || "https://api.opphub.ruiplus.cn";
-const TOKEN_FILE = join(HOME, ".opphub-plugin/token.json");
+function out(obj) {
+  const wantJson = process.argv.includes("--json");
+  if (wantJson) {
+    process.stdout.write(JSON.stringify(obj) + "\n");
+  } else {
+    console.log(JSON.stringify(obj, null, 2));
+  }
+}
 
-import { readToken as pluginReadToken } from "../lib/opphub-plugin-client.js";
+out({
+  ok: false,
+  deprecated: true,
+  removedAt,
+  error: "deprecated",
+  reason:
+    "knowledge-autofill 在 v4.0.0-alpha.1 弃用。读 token/channel/outbox/openclaw.json/MEMORY 等本机源违反产品红线, 私密数据不外发。",
+  replacement:
+    "用 skill 端 LLM 工具 (web_search/web_fetch/image/pdf) + memory_search/wiki_search, 由用户显式确认后调 knowledge-add 入库。",
+});
+
+process.exit(0);
+
 
 async function readToken() {
   // v3.1.0-alpha.3 (舟哥 14:20 红纸船): 走 plugin client proxy

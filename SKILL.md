@@ -431,7 +431,7 @@ v3.1 阶段（当前）：
 - ✅ `bin/opphub-knowledge-add.js` (单条入库)
 - ✅ `bin/opphub-knowledge-status.js` (知识库状态)
 - ✅ `bin/opphub-knowledge-search.js` (向量召回)
-- ✅ `bin/opphub-knowledge-autofill.js` (本地 6 源拼骨架, 已废弃 — 本机运维数据跟能力画像无关)
+- ⚠️ `bin/opphub-knowledge-autofill.js` (DEPRECATED 2026-07-22 · 入口已移除 — 读本机敏感源违反产品红线)
 
 ---
 
