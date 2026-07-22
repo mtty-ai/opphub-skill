@@ -1,9 +1,15 @@
 #!/usr/bin/env node
-// bin/opphub-knowledge-status.js · v3.1.0-alpha.1
-// status: implemented (状态查询, v3.1)
+// bin/opphub-knowledge-status.js · v4.0.0-alpha.1
+// status: implemented (v4 P2-6: GET 改 v2 路径 /api/knowledge?opcId=...)
 //
 // 舟哥 12:58 钉: 能力卡片改造 → 开放式知识库, 不进结构化字段
 // 舟哥 13:41 钉: 只到 skill 开放完, 不动 server schema
+//
+// v4.0.0-alpha.1 P2-6: 路径统一 v2
+//   旧: GET /api/user/knowledge/status
+//   新: GET /api/knowledge?opcId=...&entryType=...
+//   server 端 app/api/knowledge/route.ts 已支持 GET (实测, 7/22 舟哥拍)
+//   POST /api/knowledge/ingest 暂未合并 (server 端保持 /api/user/knowledge/ingest)
 //
 // 用法: bot 调 `opphub knowledge-status --json`
 // 返 { ok, entries: [{id, sourceType, rawText, chunkCount, visibility, lastKnowledgeAt}], knowledgeCount, lastKnowledgeAt }
@@ -47,9 +53,13 @@ async function main() {
     process.exit(1);
   }
 
-  // 调 GET /api/knowledge?opcId=xxx (user JWT)
-  // 注意: server schema OpcKnowledgeEntry 是 server 团队活, 不归 skill (13:41 钉)
-  const url = `${API_BASE}/api/user/knowledge/status`;
+  // v4.0.0-alpha.1 P2-6: 改 v2 路径 GET /api/knowledge?opcId=...
+  // (v3.1 旧路径 /api/user/knowledge/status 已被 v2 替代, server 端实测已支持)
+  // opc_id 缺失 → 用 'me' alias (server 端 /api/knowledge/route.ts:21 支持)
+  const opcIdParam = token.opc_id && token.opc_id.length > 0
+    ? encodeURIComponent(token.opc_id)
+    : "me";
+  const url = `${API_BASE}/api/knowledge?opcId=${opcIdParam}`;
   let resp;
   try {
     resp = await fetch(url, {
@@ -69,15 +79,14 @@ async function main() {
   }
 
   if (!resp.ok) {
-    // server 端如果还没实现 (还在 opphub-server 团队活)
-    // skill 这边 graceful 降级, 告诉 bot "知识库还没启用"
+    // server 端如果还没实现 (opphub-server 团队活)
     if (resp.status === 404 || resp.status === 501) {
       const result = {
         ok: true,
         entries: [],
         knowledgeCount: 0,
         lastKnowledgeAt: null,
-        hint: "server 端 /api/user/knowledge/status 已就绪 (v3.1 舟哥 16:54 钉 Q2=B 异步算) (opphub-server 团队活, 13:41 钉)",
+        hint: "server 端 /api/knowledge v2 GET 已支持 (7/22 实测), skill 端已迁移",
       };
       if (wantJson) console.log(JSON.stringify(result, null, 2));
       process.exit(0);
@@ -96,13 +105,15 @@ async function main() {
   try {
     data = await resp.json();
   } catch {}
-  // 期望 schema (server 端实现):
-  // { ok: true, entries: [{id, sourceType, rawText, chunkCount, embeddingModel, embeddingVersion, visibility, createdAt}], knowledgeCount, lastKnowledgeAt }
+  // server 端 v2 响应: { ok: true, data: Capability[], total, pagination }
+  // v3.1 旧响应: { ok: true, entries: [...], knowledgeCount, lastKnowledgeAt }
+  // 兼容两者
+  const entries = data.entries ?? data.data ?? [];
   const result = {
     ok: true,
-    entries: data.entries ?? [],
-    knowledgeCount: data.knowledgeCount ?? (data.entries?.length ?? 0),
-    lastKnowledgeAt: data.lastKnowledgeAt ?? (data.entries?.[0]?.createdAt ?? null),
+    entries: Array.isArray(entries) ? entries : [],
+    knowledgeCount: data.knowledgeCount ?? data.total ?? entries.length ?? 0,
+    lastKnowledgeAt: data.lastKnowledgeAt ?? entries[0]?.createdAt ?? entries[0]?.updatedAt ?? null,
   };
   if (wantJson) console.log(JSON.stringify(result, null, 2));
   else {
