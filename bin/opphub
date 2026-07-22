@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# bin/opphub · v3.1.0-alpha.1
+# bin/opphub · v4.0.0-alpha.1
 # 统一入口, 把 bot 调用转发到对应 bin/*.js
 #
-# v3.1.0-alpha.1 (舟哥 12:40-13:41 拍板):
-#   - 加偶合配置子命令 (configure list / set)
-#   - 加 plugin-check 子命令 (读 ~/.openclaw/extensions/opphub/package.json)
-#   - 加偶合知识库子命令 (knowledge-status / knowledge-add / knowledge-autofill)
-#   - login 拆 start / poll 2 步 (chat 版 2 步走)
-#   - status 字段扩 (default_channel / knowledge_status / link_health)
-#   - 全部走 bot.skillApi IntentMessage (channel-agnostic), 不拼飞书 card JSON
+# v4.0.0-alpha.1 (舟哥 2026-07-22 拍板):
+#   - 通道 v4: 通道清单走 runtime, 默认通道走 server PATCH, 不经 plugin
+#   - cron v3: cron 写改 trigger plugin (peer 由 plugin 维护)
+#   - 注册不归 skill (引导去偶合 App 或 web /activate)
+#   - knowledge-autofill 入口移除 + bin deprecated (本机敏感源违规)
+#   - knowledge-card 歧义分支必 return (避免双 JSON 输出)
+#   - token refresh 契约统一返对象
+#   - OAuth URL/path 改 spawn argv (避免 shell 注入 + 路径带空格)
+#   - frontmatter requires 完整声明 + 版本单一源 (package.json)
 
 set -euo pipefail
 
