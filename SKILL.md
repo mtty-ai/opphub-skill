@@ -1,6 +1,6 @@
 ---
 name: opphub
-version: 4.0.3
+version: 4.0.4
 description: 偶合 OppHub · OpenClaw bot skill · OPC 用户在 chat @bot 对话 · 走 OAuth device flow · 与 opphub-plugin 协同做知识库 + 撮合推送
 author: mtty-ai
 homepage: https://github.com/mtty-ai/opphub-skill
@@ -77,19 +77,77 @@ skill 通过 [ClawHub](https://clawhub.ai/mtty-ai/skills/opphub) 装。
 - macOS: 自带 `security`（Keychain）
 - Linux: 自带 `openssl`
 
-推荐装 `opphub-plugin`（macOS/Linux）做推送 + token 共享:
+### 必装: oppHub plugin（推送 + token 共享）
+
+plugin 承担 2 个不可替代角色:
+- **Keychain token 写入方**（skill 不双源, 否则 race condition）
+- **IM 通道维护 + WS 推送**（bot 推送 / 商机实时推送都靠它）
+
 ```bash
 openclaw plugins install clawhub:@mtty-ai/opphub
 ```
 
+装完 plugin 跑一次 restart:
+```bash
+# 触发 plugin runtime 启动 (60s tick 自动 refresh 也行)
+openclaw gateway restart
+```
+
+verify 装好:
+```bash
+opphub plugin-check --json
+# → { ok: true, installed: true, version: "0.7.x", path: "..." }
+```
+
 ---
 
-## 🚀 第一次使用
+## 🚀 第一次使用（4 步引导）
 
-| 步骤 | 在哪做 | 做什么 |
-|---|---|---|
-| 1 | [偶合 App](https://api.opphub.ruiplus.cn/activate?signup=1) 或 web `/activate` | 注册账号（email/手机号 + 验证码） |
-| 2 | OpenClaw 飞书群聊 @bot 说 "偶合登录" | 走 OAuth device flow 拿 token, 落 Keychain |
+### 第 1 步: 注册偶合账号
+
+注册在 [偶合 App](https://api.opphub.ruiplus.cn/activate?signup=1) 或 web `/activate` 完成（skill 不参与注册）。
+
+输入邮箱 / 手机号 + 6 位验证码 → 创建 OPC 账号 → status `active`。
+
+### 第 2 步: OpenClaw 群里 @bot 说 "偶合登录"
+
+bot 走 OAuth Device Flow:
+1. 拿 device_code + user_code + verify_url
+2. **私聊** 推 verify_url + user_code（**群聊不贴**, 验证码只在私聊）
+3. 你浏览器打开链接点同意（或偶合 App 扫码）
+4. token 自动写 macOS Keychain `service=openclaw-opphub-uat / account=opphub:default`（plugin 共用同一份）
+5. plugin 60s tick 自动 refresh（5 分钟 buffer）
+
+bot 引导 "已登录 OPC xxx", 然后进第 3 步。
+
+### 第 3 步: 选默认推送通道
+
+bot 读本机 IM 通道（飞书 / 微信 / 钉钉）+ 调 `bin/opphub-configure set`:
+```bash
+opphub configure set --channel-type feishu --channel-id dev --json
+```
+
+bot 输出 IntentMessage 卡片让你选:
+```
+本机已配通道 · ⭐ server 选中: `feishu:dev`
+- feishu:default
+- feishu:dev   ← 当前
+- feishu:frontend
+- feishu:pm
+```
+
+选完写到 opphub-server (PATCH `/api/user/channels/default`), 后续 cron / 推送都用这个通道。
+
+### 第 4 步: 录入第一家公司试试
+
+bot 引导:
+```
+@bot 偶合录入 睿驰嘉禾
+```
+
+bot 走 6 阶段（discover / card / submit / match）, 你只需在阶段 3 确认 1 次。
+
+闭环完成 ✅: 注册 → 登录 → 装 plugin → 选默认通道 → 录入公司
 | 3 | bot 引导 | 装 plugin + 选默认推送通道 |
 | 4 | bot 引导 | 录入第一家公司试试 |
 
