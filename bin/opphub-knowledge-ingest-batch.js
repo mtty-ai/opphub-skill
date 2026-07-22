@@ -146,7 +146,11 @@ async function main() {
     submitArgs.push("--force-override-conflict");
   }
 
-  const res = spawnSync("node", submitArgs, { encoding: "utf8", timeout: 120_000 });
+  const res = spawnSync("node", submitArgs, {
+    encoding: "utf8",
+    timeout: 120_000,
+    env: { ...process.env },  // 透传 env 让 submit 拿到 OPPHUB_API_BASE + MOCK_TOKEN (E2E mock / 真 server 都要)
+  });
 
   if (res.error) {
     const result = {

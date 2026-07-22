@@ -44,6 +44,12 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { getAccessToken as pluginGetAccessToken } from "../lib/opphub-plugin-client.js";
 
+// E2E / mock 模式 (env):
+//   OPPHUB_MOCK_TOKEN  启用时, skill 不用 plugin client, 直接返这个 token (E2E 测试用)
+//   OPPHUB_MOCK_OPC_ID  mock token 对应的 opcId (从 JWT 解不出来时 fallback)
+const MOCK_TOKEN = process.env.OPPHUB_MOCK_TOKEN || null;
+const MOCK_OPC_ID = process.env.OPPHUB_MOCK_OPC_ID || null;
+
 const API_BASE = process.env.OPPHUB_API_BASE || "https://api.opphub.ruiplus.cn";
 
 function parseArgs(argv) {
@@ -151,7 +157,7 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
   // 2. 拿 token (v3.1.0-alpha.3 锁: 走 plugin client proxy)
   let accessToken;
   try {
-    accessToken = await pluginGetAccessToken();
+    accessToken = MOCK_TOKEN || await pluginGetAccessToken();
   } catch (e) {
     if (wantJson) out({
       ok: false,
@@ -164,7 +170,7 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
     if (wantJson) out({ ok: false, error: "no_token", message: "access_token 为空, 请先偶合登录" });
     process.exit(1);
   }
-  const opcId = decodeJwtPayload(accessToken).opcId;
+  const opcId = MOCK_OPC_ID || decodeJwtPayload(accessToken).opcId;
   if (!opcId) {
     if (wantJson) out({ ok: false, error: "invalid_token", message: "JWT 里没有 opcId" });
     process.exit(1);
