@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// bin/opphub-token-refresh.js · v3.1.0-alpha.3
+// bin/opphub-token-refresh.js · v4.0.0-alpha.1
 //
 // 舟哥 14:21 拍: "代码都得改"
 //   skill 不再自实现 refresh (原本 11845 bytes 双源 dup), 改走 plugin client proxy
@@ -14,6 +14,10 @@
 //   - 同一 Keychain entry: service=openclaw-opphub-uat account=opphub:default
 //   - 同一 refreshLocks Map() per-opcId (plugin 内部)
 //   - 同一 REFRESH_AHEAD_MS = 5min buffer
+//
+// v4.0.0-alpha.1 P0-3: refreshToken 返完整 token 对象 (跟 readToken 一致)
+//   之前 3 个 return 都返 string (access_token), 调 t2.expires_at 拿不到, 报 "Invalid time value"
+//   修: refreshToken() 统一返 { access_token, refresh_token, expires_at, ... }
 
 import {
   readToken,
@@ -28,12 +32,16 @@ const args = process.argv.slice(2);
 const mode = (args.find(a => a.startsWith("--mode="))?.split("=")[1] ?? "auto");
 const force = args.includes("--force");
 
+function out(obj) {
+  console.log(JSON.stringify(obj, null, 2));
+}
+
 async function main() {
   if (mode === "status") {
     const t = await readToken();
     const s = await tokenStatus(t);
     const health = await healthCheck();
-    console.log(JSON.stringify({
+    out({
       ok: true,
       mode: "status",
       plugin_client: health,
@@ -42,7 +50,7 @@ async function main() {
       obtained_at: t?.obtained_at ?? null,
       expires_at: t ? new Date(t.expires_at).toISOString() : null,
       refresh_expires_at: t?.refresh_expires_at ? new Date(t.refresh_expires_at).toISOString() : null,
-    }, null, 2));
+    });
     return;
   }
 
@@ -50,45 +58,46 @@ async function main() {
     // 强 refresh (不管 status)
     const t1 = await readToken();
     const s1 = await tokenStatus(t1);
-    console.error(`[v3.1.0-alpha.3] before refresh: ${s1}`);
     const t2 = await refreshToken({ force });
     const s2 = await tokenStatus(t2);
-    console.log(JSON.stringify({
+    out({
       ok: true,
       mode: "refresh",
       before: s1,
       after: s2,
-      new_expires_at: t2 ? new Date(t2.expires_at).toISOString() : null,
-    }, null, 2));
+      opc_id: t2?.opc_id ?? null,
+      new_expires_at: t2?.expires_at ? new Date(t2.expires_at).toISOString() : null,
+      new_refresh_expires_at: t2?.refresh_expires_at ? new Date(t2.refresh_expires_at).toISOString() : null,
+    });
     return;
   }
 
   // mode === "auto" (default): 走 getAccessToken (内部按 status 自动选)
   try {
     const accessToken = await getAccessToken();
-    console.log(JSON.stringify({
+    out({
       ok: true,
       mode: "auto",
       access_token_length: accessToken?.length ?? 0,
       access_token_suffix: accessToken ? `...${accessToken.slice(-12)}` : null,
       hint: "valid 或 needs_refresh 自动续; expired/missing 返 ok=false (device flow 没浏览器跑不了)",
-    }, null, 2));
+    });
   } catch (e) {
-    console.log(JSON.stringify({
+    out({
       ok: false,
       mode: "auto",
       error: e?.message ?? String(e),
       hint: "可能是 plugin 不在 / token expired 需要走 device flow",
-    }, null, 2));
+    });
     process.exit(1);
   }
 }
 
 main().catch((e) => {
-  console.log(JSON.stringify({
+  out({
     ok: false,
     error: "internal_error",
     message: e?.message ?? String(e),
-  }, null, 2));
+  });
   process.exit(1);
 });
