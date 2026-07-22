@@ -1,6 +1,6 @@
 {
   "name": "opphub-skill",
-  "version": "4.0.5",
+  "version": "4.0.6",
   "description": "偶合 OppHub · OpenClaw bot skill · OPC 用户在 chat @bot 对话 · 走 device flow OAuth · 6 步闭环 + 开放式知识库 · 与 opphub-plugin 共 Keychain",
   "author": "mtty-ai",
   "homepage": "https://github.com/mtty-ai/opphub-skill",
