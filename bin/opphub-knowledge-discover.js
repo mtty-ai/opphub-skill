@@ -79,11 +79,25 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const wantJson = args.json;
 
-  if (!args.name && !args.rawText) {
+  // v4.0.0-alpha.1 P1-4: 强校验 name + raw-text 必传
+  //   之前: --name 缺也能跑 (会返 "未指定, 由 rawText 推断" 但 rawText 缺公司名会跑不下去)
+  //   修: 两者必须同时传, --name 单独传走 query-plan 模式, --raw-text 单独传返 invalid_input
+  if (!args.name) {
     const result = {
       ok: false,
       error: "missing_name",
-      message: "需要 --name \"公司名\" 或 --raw-text (bot 拼好的)",
+      message: "需要 --name \"公司名\" (必填, v4.0.0-alpha.1 P1-4 强校验)",
+    };
+    if (wantJson) console.log(JSON.stringify(result, null, 2));
+    process.exit(1);
+  }
+
+  // raw-text 单独传 → 拒绝 (v4 强校验, rawText 必须跟 --name 一起)
+  if (args.rawText && args.name && !args.rawText.trim()) {
+    const result = {
+      ok: false,
+      error: "empty_raw_text",
+      message: "--raw-text 传了但内容为空",
     };
     if (wantJson) console.log(JSON.stringify(result, null, 2));
     process.exit(1);
@@ -91,7 +105,7 @@ async function main() {
 
   const t0 = Date.now();
 
-  // raw-text 优先 (bot 已调 LLM 拼好)
+  // raw-text 透传模式 (必须 --name + --raw-text 同时存在)
   if (args.rawText) {
     // 舟哥 7/20 13:00 拍: rawText 接收时必须验证 (防止拼错公司名 / 查不到数据)
     // 舟哥 7/20 13:03 拍: 加拼写纠错 (web_results 传 web_search 返的 JSON 或文件路径)
@@ -113,7 +127,7 @@ async function main() {
     const result = {
       ok: validation.ok,
       mode: "raw-text-passthrough",
-      name: args.name || "(未指定, 由 rawText 推断)",
+      name: args.name,  // v4.0.0-alpha.1 P1-4: 必填, 不再是 "(未指定, 由 rawText 推断)"
       rawText: args.rawText,
       sources: [
         { category: "passthrough", name: "bot_skill_turn", status: "received" },
