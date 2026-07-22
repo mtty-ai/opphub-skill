@@ -18,6 +18,10 @@
 // v4.0.0-alpha.1 P0-3: refreshToken 返完整 token 对象 (跟 readToken 一致)
 //   之前 3 个 return 都返 string (access_token), 调 t2.expires_at 拿不到, 报 "Invalid time value"
 //   修: refreshToken() 统一返 { access_token, refresh_token, expires_at, ... }
+//
+// v4.0.0-alpha.1 P1-8: 改用 lib/error-format.js 统一错误结构
+//   旧: { ok:false, error:"...", message:"..." } 零散
+//   新: { ok:false, stage, code, retryable, hint, traceId } 结构化
 
 import {
   readToken,
@@ -27,6 +31,7 @@ import {
   refreshToken,
   healthCheck,
 } from "../lib/opphub-plugin-client.js";
+import { formatError, formatOk } from "../lib/error-format.js";
 
 const args = process.argv.slice(2);
 const mode = (args.find(a => a.startsWith("--mode="))?.split("=")[1] ?? "auto");
@@ -38,66 +43,78 @@ function out(obj) {
 
 async function main() {
   if (mode === "status") {
-    const t = await readToken();
-    const s = await tokenStatus(t);
-    const health = await healthCheck();
-    out({
-      ok: true,
-      mode: "status",
-      plugin_client: health,
-      token_status: s,
-      opc_id: t?.opc_id ?? null,
-      obtained_at: t?.obtained_at ?? null,
-      expires_at: t ? new Date(t.expires_at).toISOString() : null,
-      refresh_expires_at: t?.refresh_expires_at ? new Date(t.refresh_expires_at).toISOString() : null,
-    });
+    try {
+      const t = await readToken();
+      const s = await tokenStatus(t);
+      const health = await healthCheck();
+      out(formatOk({
+        mode: "status",
+        plugin_client: health,
+        token_status: s,
+        opc_id: t?.opc_id ?? null,
+        obtained_at: t?.obtained_at ?? null,
+        expires_at: t ? new Date(t.expires_at).toISOString() : null,
+        refresh_expires_at: t?.refresh_expires_at ? new Date(t.refresh_expires_at).toISOString() : null,
+      }));
+    } catch (e) {
+      out(formatError({
+        code: "keychain_unavailable",
+        message: e?.message ?? String(e),
+        hint: "plugin 不在或 Keychain 损坏, 重装 plugin: openclaw plugins install clawhub:@mtty-ai/opphub",
+      }));
+      process.exit(1);
+    }
     return;
   }
 
   if (mode === "refresh") {
-    // 强 refresh (不管 status)
-    const t1 = await readToken();
-    const s1 = await tokenStatus(t1);
-    const t2 = await refreshToken({ force });
-    const s2 = await tokenStatus(t2);
-    out({
-      ok: true,
-      mode: "refresh",
-      before: s1,
-      after: s2,
-      opc_id: t2?.opc_id ?? null,
-      new_expires_at: t2?.expires_at ? new Date(t2.expires_at).toISOString() : null,
-      new_refresh_expires_at: t2?.refresh_expires_at ? new Date(t2.refresh_expires_at).toISOString() : null,
-    });
+    try {
+      const t1 = await readToken();
+      const s1 = await tokenStatus(t1);
+      const t2 = await refreshToken({ force });
+      const s2 = await tokenStatus(t2);
+      out(formatOk({
+        mode: "refresh",
+        before: s1,
+        after: s2,
+        opc_id: t2?.opc_id ?? null,
+        new_expires_at: t2?.expires_at ? new Date(t2.expires_at).toISOString() : null,
+        new_refresh_expires_at: t2?.refresh_expires_at ? new Date(t2.refresh_expires_at).toISOString() : null,
+      }));
+    } catch (e) {
+      out(formatError({
+        code: "token_refresh_failed",
+        message: e?.message ?? String(e),
+        hint: "refresh 失败, 检查网络 / 重新走偶合登录",
+      }));
+      process.exit(1);
+    }
     return;
   }
 
   // mode === "auto" (default): 走 getAccessToken (内部按 status 自动选)
   try {
     const accessToken = await getAccessToken();
-    out({
-      ok: true,
+    out(formatOk({
       mode: "auto",
       access_token_length: accessToken?.length ?? 0,
       access_token_suffix: accessToken ? `...${accessToken.slice(-12)}` : null,
       hint: "valid 或 needs_refresh 自动续; expired/missing 返 ok=false (device flow 没浏览器跑不了)",
-    });
+    }));
   } catch (e) {
-    out({
-      ok: false,
-      mode: "auto",
-      error: e?.message ?? String(e),
-      hint: "可能是 plugin 不在 / token expired 需要走 device flow",
-    });
+    out(formatError({
+      code: "no_token",
+      message: e?.message ?? String(e),
+      hint: "可能是 plugin 不在 / token expired 需要走偶合登录",
+    }));
     process.exit(1);
   }
 }
 
 main().catch((e) => {
-  out({
-    ok: false,
-    error: "internal_error",
+  out(formatError({
+    code: "internal_error",
     message: e?.message ?? String(e),
-  });
+  }));
   process.exit(1);
 });
