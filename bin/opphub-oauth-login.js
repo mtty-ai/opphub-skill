@@ -129,26 +129,12 @@ async function openUrl(url) {
 // startDeviceFlow: 拿 device_code + user_code + verification_url, 不 poll
 // pollDeviceFlow: 阻塞 poll 拿 access_token
 async function startDeviceFlow() {
-  // 1. 拿 device_code + user_code
-  const codeResp = await fetch(AUTHORIZE_URL, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ client_id: CLIENT_ID, scope: DEFAULT_SCOPE }),
-  });
-  if (!codeResp.ok) {
-    const text = await codeResp.text();
-    err("device_code_failed", `server 返 ${codeResp.status}: ${text}`);
-  }
-  const dc = await codeResp.json();
-  const verificationUriComplete =
-    dc.verification_uri_complete ??
-    `${dc.verification_uri}${dc.verification_uri.includes("?") ? "&" : "?"}user_code=${encodeURIComponent(dc.user_code)}`;
-
-  // v3.1.0-alpha.2 (舟哥 14:01 bug fix): start 去重保护
-  // 30 秒内有未过期的 device_code 就复用, 不重复调 server (避免作废老的)
+  // v4.0.0-alpha.1 P1-1: start 复用前置 (舟哥 7/20 14:01 拍的 bug fix 之前顺序错)
+  //   之前: 先请求 server 拿 device_code (老的被作废) → 后读 start state 检查复用
+  //         复用逻辑永远不命中, 浪费 1 个 device_code
+  //   修: 先读 start state, 命中复用就 return, 没命中再请求 server
   const recent = readStartState();
-  const isRetry = !!recent;
-  if (isRetry) {
+  if (recent) {
     out({
       ok: true,
       stage: "awaiting_user_authorization",
@@ -160,7 +146,7 @@ async function startDeviceFlow() {
       interval: 5,
       browser_opened: false,
       reused: true,  // bot 知道这是复用, 不再出新的 user_code 让用户输
-      hint: "30 秒内复用上次 start, 不重复 (舟哥 14:01 抓的 bug fix)",
+      hint: "复用上次 start, 不重复 (舟哥 14:01 抓的 bug fix, v4 顺序前置)",
       next_steps: {
         bot_prompt: `🟡 复用上次的 device_code, 不重复弹验证码
 
@@ -175,6 +161,21 @@ ${recent.verification_uri_complete}
     });
     return;
   }
+
+  // 没复用, 才请求 server 拿新 device_code
+  const codeResp = await fetch(AUTHORIZE_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ client_id: CLIENT_ID, scope: DEFAULT_SCOPE }),
+  });
+  if (!codeResp.ok) {
+    const text = await codeResp.text();
+    err("device_code_failed", `server 返 ${codeResp.status}: ${text}`);
+  }
+  const dc = await codeResp.json();
+  const verificationUriComplete =
+    dc.verification_uri_complete ??
+    `${dc.verification_uri}${dc.verification_uri.includes("?") ? "&" : "?"}user_code=${encodeURIComponent(dc.user_code)}`;
 
   // v3.1: 不自动 openBrowser (bot 跑没 stdin, 不能 spawn `open`)
   // 让 bot 拿到 verification_uri_complete 出 IntentMessage, 用户自己点开
