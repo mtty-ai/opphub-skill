@@ -79,6 +79,11 @@ const INDUSTRY_TEMPLATES = {
       { category: "视频号运营方", desc: "视频号生态运营方" },
       { category: "4A 公司", desc: "传统 4A 广告公司" },
     ],
+    peer: [
+      { category: "同业联盟", desc: "同业 MCN / 数字营销公司" },
+      { category: "同业参考", desc: "可参考的同行 / 行业标杆" },
+      { category: "关联企业", desc: "上下游 / 兄弟公司" },
+    ],
   },
   saas: {
     name: "SaaS / 撮合平台",
@@ -307,6 +312,18 @@ function generateCards(name, industryCode, rawText) {
       cards.push(buildCard("downstream", dn.category, "⬇️", dn, hit.source));
     } else {
       recordUnmatch("downstream", dn.category, dn.desc);
+    }
+  }
+
+  // 同行关系 (peer) — v3.4 spec 4 种 entryType 全部覆盖
+  if (Array.isArray(template.peer)) {
+    for (const p of template.peer) {
+      const hit = hasEvidence(p.category, p.desc);
+      if (hit.ok) {
+        cards.push(buildCard("peer", p.category, "🔗", p, hit.source));
+      } else {
+        recordUnmatch("peer", p.category, p.desc);
+      }
     }
   }
 
