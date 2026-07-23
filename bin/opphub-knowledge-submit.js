@@ -152,6 +152,7 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
     if (wantJson) out({ ok: false, error: "no_cards", message: "cards 数组为空" });
     process.exit(1);
   }
+  const parsedFields = cardsDoc.parsedFields ?? null;
 
   let accessToken;
   try {
@@ -212,6 +213,7 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
           entryDimension: dimension,
           idempotencyKey,
           contentHash,
+          parsedFields: parsedFields ?? undefined,
           forceOverride: args.forceOverrideConflict,
         }),
       });

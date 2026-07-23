@@ -114,6 +114,46 @@ const INDUSTRY_TEMPLATES = {
   },
 };
 
+// 从 rawText 抽结构化字段 (公司基础信息)
+// v4.0.9 新增: 跟 server 端 OpcKnowledgeEntry.parsedFields 字段对应
+function extractParsedFields(name, rawText, industry) {
+  const fields = {};
+  fields.companyName = name;
+  fields.industry = industry ? { code: industry.code, name: industry.name } : null;
+
+  // 法律实体
+  const legalPersonMatch = rawText.match(/法人[:：]\s*([^\n]+)/);
+  if (legalPersonMatch) fields.legalPerson = legalPersonMatch[1].trim().slice(0, 50);
+
+  // 注册资本
+  const capitalMatch = rawText.match(/注册资本[:：]\s*([^\n]+)/);
+  if (capitalMatch) fields.registeredCapital = capitalMatch[1].trim().slice(0, 50);
+
+  // 信用代码
+  const creditMatch = rawText.match(/(?:信用代码|统一社会信用代码)[:：]\s*([A-Z0-9]{18,20})/);
+  if (creditMatch) fields.creditCode = creditMatch[1].trim();
+
+  // 团队规模
+  const sizeMatch = rawText.match(/(?:团队规模|规模|人数)[:：]\s*([^\n]+)/);
+  if (sizeMatch) fields.teamSize = sizeMatch[1].trim().slice(0, 50);
+
+  // 地址
+  const addressMatch = rawText.match(/地址[:：]\s*([^\n]+)/);
+  if (addressMatch) fields.address = addressMatch[1].trim().slice(0, 100);
+
+  // 城市 (从 rawText 里识别)
+  const cities = ["上海", "北京", "深圳", "广州", "杭州", "成都", "南京", "武汉", "苏州", "天津", "重庆"];
+  for (const c of cities) {
+    if (rawText.includes(c)) { fields.city = c; break; }
+  }
+
+  // 业务描述 (取 ## 2. 业务描述 段)
+  const bizMatch = rawText.match(/##\s*2\.\s*业务描述\s*\n+([\s\S]*?)(?=\n##\s|\s*$)/);
+  if (bizMatch) fields.businessDescription = bizMatch[1].trim().slice(0, 500);
+
+  return fields;
+}
+
 // 推断行业 (基于 rawText 关键词匹配)
 function inferIndustry(rawText) {
   const scores = {};
@@ -336,6 +376,7 @@ async function main() {
       scores: industryScores,
     },
     cards,
+    parsedFields: extractParsedFields(name, args.rawText, { code: industryCode, name: template.name }),
     cardCount: cards.length,
     unmatchedTemplates,
     unmatchedCount: unmatchedTemplates.length,
