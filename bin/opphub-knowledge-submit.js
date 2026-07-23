@@ -60,6 +60,7 @@ function parseArgs(argv) {
     else if (a === "--cards") args.cards = argv[++i];
     else if (a === "--cards-out") args.cardsOut = argv[++i];
     else if (a === "--force-override-conflict") args.forceOverrideConflict = true;
+    else if (a === "--confirm") args.confirm = true;
     else if (!a.startsWith("--")) args._.push(a);
   }
   return args;
@@ -153,6 +154,16 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
     process.exit(1);
   }
   const parsedFields = cardsDoc.parsedFields ?? null;
+
+  // v4.0.9: confirmation state machine - 默认拒绝, 收到 --confirm 才入库
+  if (!args.confirm) {
+    if (wantJson) out({
+      ok: false,
+      error: "needs_confirmation",
+      message: "未确认 — 需先跑 knowledge-card 看 confirmation 清单, 用户回复'确认'后再加 --confirm 入库",
+    });
+    process.exit(1);
+  }
 
   let accessToken;
   try {

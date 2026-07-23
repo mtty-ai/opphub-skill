@@ -154,6 +154,38 @@ function extractParsedFields(name, rawText, industry) {
   return fields;
 }
 
+// v4.0.9: 生成 4 种 entryType 全部的确认清单
+// 用途: 供 IM bot 给用户发「将要录入什么」的清单
+function buildConfirmationList(name, industry, cards, parsedFields) {
+  const groups = {
+    ability: { label: "我能提供", emoji: "✅", items: [] },
+    downstream: { label: "我想找", emoji: "🔍", items: [] },
+    upstream: { label: "我的依赖", emoji: "⬆️", items: [] },
+    peer: { label: "同行关系", emoji: "🔗", items: [] },
+  };
+  for (const c of cards) {
+    if (groups[c.type]) {
+      groups[c.type].items.push({
+        dimension: c.dimension,
+        evidenceSource: c.evidenceSource ?? "rawText 关键词命中",
+      });
+    }
+  }
+
+  // 把空组去掉, 只列有内容的
+  const nonEmpty = Object.entries(groups).filter(([_, g]) => g.items.length > 0);
+
+  return {
+    name,
+    industry: industry ? { code: industry.code, name: industry.name } : null,
+    companyName: parsedFields?.companyName ?? name,
+    businessDescription: parsedFields?.businessDescription ?? null,
+    totalCards: cards.length,
+    groups: nonEmpty.map(([type, g]) => ({ type, label: g.label, emoji: g.emoji, items: g.items })),
+    instructions: "回复「确认」入库；回复「删 <type.dimension>」去掉某条；回复「重抽」回到阶段 1",
+  };
+}
+
 // 推断行业 (基于 rawText 关键词匹配)
 function inferIndustry(rawText) {
   const scores = {};
@@ -364,6 +396,8 @@ async function main() {
   const template = INDUSTRY_TEMPLATES[industryCode] || INDUSTRY_TEMPLATES.unknown;
   const { cards, unmatchedTemplates } = generateCards(name, industryCode, args.rawText);
 
+  const fields = extractParsedFields(name, args.rawText, { code: industryCode, name: template.name });
+
   const result = {
     ok: cards.length > 0,
     warning: cards.length === 0 ? "rawText 跟所有行业模板都无证据命中, skill 不准瞎填, 空入库不允许" : (unmatchedTemplates.length > 0 ? `有 ${unmatchedTemplates.length} 条模板字段因无证据未拆 (见 unmatchedTemplates) — 这些不准入库` : null),
@@ -376,7 +410,8 @@ async function main() {
       scores: industryScores,
     },
     cards,
-    parsedFields: extractParsedFields(name, args.rawText, { code: industryCode, name: template.name }),
+    parsedFields: fields,
+    confirmation: buildConfirmationList(name, { code: industryCode, name: template.name }, cards, fields),
     cardCount: cards.length,
     unmatchedTemplates,
     unmatchedCount: unmatchedTemplates.length,
