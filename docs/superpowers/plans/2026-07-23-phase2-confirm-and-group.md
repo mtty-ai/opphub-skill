@@ -699,8 +699,8 @@ git tag phase-2-confirm-group
 
 ## 为什么 v4 比 v3 更好
 
-- v3 只加 rawText 版本头, 是 "格式" 升级, 没碰核心流程
-- v4 加上:
+- v3 只加 rawText 版本头 + web 引导 (4 文件), 是 "格式" 升级, 没碰核心流程
+- v4 在 v3 基础上**加 3 件事**:
   - **确认流程** (skill 端的核心安全网, 防止乱入库)
   - **确认清单覆盖 4 种 entryType** (不只是 ability, 包含 downstream/upstream/peer)
   - **结构化字段** (parsedFields, 让 web 端有数据画公司卡片)
