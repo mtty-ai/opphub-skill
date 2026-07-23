@@ -34,6 +34,15 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 
+// v4.0.9: rawText 顶部加版本头, 让 server 端能识别协议版本
+//   v1 (当前): 自由文本, 不锁结构, 内容是 LLM 自由拼出来的 rawText
+//   v2 (未来): 加结构化字段 (parseKeyFields 强校验)
+function ensureVersionHeader(rawText) {
+  if (!rawText) return rawText;
+  if (rawText.startsWith("<!-- opphub-raw-text-v1 -->")) return rawText;
+  return `<!-- opphub-raw-text-v1 -->\n${rawText}`;
+}
+
 function parseArgs(argv) {
   const args = { _: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -68,8 +77,9 @@ function buildQueryPlan(name) {
 
 function buildRawTextSkeleton(name) {
   // skill turn 按这个骨架填入 LLM/web 调的实际结果
-  return `# ${name} · 自动画像 (skill turn 阶段 1 拼骨架)\n\n` +
+  const skeleton = `# ${name} · 自动画像 (skill turn 阶段 1 拼骨架)\n\n` +
     SOURCE_SKELETON.map((s, i) => `## ${i + 1}. ${s.name}\n(${s.purpose})\n\n`).join("");
+  return `<!-- opphub-raw-text-v1 -->\n${skeleton}`;
 }
 
 async function main() {
@@ -123,7 +133,7 @@ async function main() {
       ok: validation.ok,
       mode: "raw-text-passthrough",
       name: args.name,  // v4.0.0 P1-4: 必填, 不再是 "(未指定, 由 rawText 推断)"
-      rawText: args.rawText,
+      rawText: ensureVersionHeader(args.rawText),
       sources: [
         { category: "passthrough", name: "bot_skill_turn", status: "received" },
       ],

@@ -188,8 +188,12 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
       // 缺字段, 跳过 (skill 不做判断, 但本 bin 至少保证 rawText 完整)
       continue;
     }
+    // v4.0.9: 兜底 - 老的 card.text 没版本头时, 补上 (旧 skill 数据兼容)
+    const textWithHeader = text.startsWith("<!-- opphub-raw-text-v1 -->")
+      ? text
+      : `<!-- opphub-raw-text-v1 -->\n${text}`;
     const idempotencyKey = sha256(`${opcId}|${type}|${dimension}`);
-    const contentHash = sha256(text);
+    const contentHash = sha256(textWithHeader);
 
     let respData;
     let httpStatus = 0;
@@ -202,7 +206,7 @@ server 端 4 种响应 (POST /api/knowledge/ingest v2):
         },
         body: JSON.stringify({
           opcId,
-          rawText: text,
+          rawText: textWithHeader,
           sourceType: "auto",
           entryType: type,
           entryDimension: dimension,

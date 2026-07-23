@@ -195,7 +195,7 @@ function generateCards(name, industryCode, rawText) {
       dimension: dim,
       emoji,
       evidenceSource,
-      text: `${name} · ${label} · ${dim}${evidenceNote}\n\n(来自 rawText 实查, 非模板填空)`,
+      text: `<!-- opphub-raw-text-v1 -->\n${name} · ${label} · ${dim}${evidenceNote}\n\n(来自 rawText 实查, 非模板填空)`,
     };
   }
 
