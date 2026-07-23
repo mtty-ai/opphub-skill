@@ -1,0 +1,188 @@
+// 偶合 OppHub · Prisma Schema
+// ★ 老板 11:12 拍板 B：PostgreSQL 16 + pgvector
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+// ============================================
+// v2.2 新增（老板 11:41 修正）：OPC 账号 + 公司 + 通道
+// ============================================
+
+model OpcAccount {
+  id            String    @id @default(cuid())
+  opcId         String    @unique @map("opc_id")
+  email         String?   @unique
+  phone         String?   @unique
+  passwordHash  String?   @map("password_hash")
+  kycLevel      Int       @default(0) @map("kyc_level")
+  status        String    @default("ACTIVE")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  lastLoginAt   DateTime? @map("last_login_at")
+
+  company       OpcCompany?
+  channels      OpcChannel[]
+  profile       OpcProfile?
+  trustScore    OpcTrustScore?
+  matchingRecords  MatchingRecord[]
+  orders        Order[]
+  balanceAccount   BalanceAccount?
+
+  @@map("opc_account")
+}
+
+model OpcCompany {
+  id              String   @id @default(cuid())
+  opcId           String   @unique @map("opc_id")
+  companyName     String   @map("company_name")
+  companyType     String   @map("company_type")
+  legalPerson     String   @map("legal_person")
+  creditCode      String?  @map("credit_code")
+  teamSize        Int      @default(1) @map("team_size")
+  address         String?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  opc             OpcAccount @relation(fields: [opcId], references: [opcId])
+
+  @@map("opc_company")
+}
+
+model OpcChannel {
+  id          String   @id @default(cuid())
+  opcId       String   @map("opc_id")
+  channelType String   @map("channel_type")
+  channelId   String   @map("channel_id")
+  isDefault   Boolean  @default(false) @map("is_default")
+  bindAt      DateTime @default(now()) @map("bind_at")
+
+  opc         OpcAccount @relation(fields: [opcId], references: [opcId])
+
+  @@unique([opcId, channelType, channelId])
+  @@map("opc_channel")
+}
+
+model OpcProfile {
+  id              String   @id @default(cuid())
+  opcId           String   @unique @map("opc_id")
+  mainSkill       String   @map("main_skill")
+  subSkills       String[] @map("sub_skills")
+  experience      String
+  cases           Json?
+  priceMin        Decimal? @map("price_min") @db.Decimal(10, 2)
+  priceMax        Decimal? @map("price_max") @db.Decimal(10, 2)
+  differentiators Json?    @map("differentiators")
+  embedding       Unsupported("vector(768)")?
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  opc             OpcAccount @relation(fields: [opcId], references: [opcId])
+
+  @@map("opc_profile")
+}
+
+model OpcTrustScore {
+  id          String   @id @default(cuid())
+  opcId       String   @unique @map("opc_id")
+  score       Int      @default(60)
+  behavior    Int      @default(0)
+  transaction Int      @default(0)
+  peerReview  Int      @default(0) @map("peer_review")
+  lastUpdated DateTime @updatedAt @map("last_updated")
+
+  opc         OpcAccount @relation(fields: [opcId], references: [opcId])
+
+  @@map("opc_trust_score")
+}
+
+model Demand {
+  id          String   @id @default(cuid())
+  demandId    String   @unique @default(cuid()) @map("demand_id")
+  title       String
+  description String
+  budget      Decimal  @db.Decimal(10, 2)
+  city        String?
+  deadline    DateTime?
+  source      String
+  status      String   @default("OPEN")
+  createdBy   String?  @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  matchingRecords  MatchingRecord[]
+
+  @@map("demand")
+}
+
+model MatchingRecord {
+  id          String   @id @default(cuid())
+  opcId       String   @map("opc_id")
+  demandId    String   @map("demand_id")
+  semanticScore  Float @map("semantic_score")
+  priceScore     Float @map("price_score")
+  timeScore      Float @map("time_score")
+  trustScore     Float @map("trust_score")
+  totalScore     Float @map("total_score")
+  explainText    String? @map("explain_text")
+  interest       Boolean @default(false)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  opc            OpcAccount @relation(fields: [opcId], references: [opcId])
+  demand         Demand     @relation(fields: [demandId], references: [demandId])
+
+  @@unique([opcId, demandId])
+  @@index([opcId, totalScore])
+  @@map("matching_record")
+}
+
+model BalanceAccount {
+  id          String   @id @default(cuid())
+  opcId       String   @unique @map("opc_id")
+  balance     Decimal  @default(0) @db.Decimal(18, 4)
+  frozen      Decimal  @default(0) @db.Decimal(18, 4)
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  opc         OpcAccount @relation(fields: [opcId], references: [opcId])
+
+  @@map("balance_account")
+}
+
+model Order {
+  id          String   @id @default(cuid())
+  orderNo     String   @unique @map("order_no")
+  opcId       String   @map("opc_id")
+  demandId    String   @map("demand_id")
+  amount      Decimal  @db.Decimal(10, 2)
+  payChannel  String   @map("pay_channel")
+  recvChannel String   @map("recv_channel")
+  platformFee Decimal  @map("platform_fee") @db.Decimal(10, 2)
+  status      String   @default("CREATED")
+  createdAt   DateTime @default(now()) @map("created_at")
+  paidAt      DateTime? @map("paid_at")
+  deliveredAt DateTime? @map("delivered_at")
+  acceptedAt  DateTime? @map("accepted_at")
+
+  opc         OpcAccount @relation(fields: [opcId], references: [opcId])
+
+  @@index([opcId, status])
+  @@map("order")
+}
+
+model VerifyCode {
+  id        String   @id @default(cuid())
+  target    String
+  code      String
+  purpose   String
+  used      Boolean  @default(false)
+  expireAt  DateTime @map("expire_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([target, purpose])
+  @@map("verify_code")
+}
