@@ -1,31 +1,45 @@
 #!/usr/bin/env node
-// bin/opphub-knowledge-card.js · v4.0
-// status: implemented (v4 P0-4 歧义分支必 return, 避免双 JSON 输出)
+// bin/opphub-knowledge-card.js · v5.0
 //
-//   行业推断 (按工商/招聘关键词)
-//   按行业模板拆能力卡片 + 行业经验 + 上下游 + 同业
-//   输出 cards[] 数组 (供阶段 5 批量入库)
+// ⚠️ 不写死任何业务词 / 行业模板 / 平台字典 / 业务通用词
+//   - 不写 INDUSTRY_TEMPLATES (mcn/saas/law/mfg 全删)
+//   - 不写 INDUSTRY_SIGNALS (token 频率猜行业)
+//   - 不写 PLATFORM_TERMS / GENERIC_TERMS / TAIL_GENERIC / MID_GENERIC
+//   - 不写 hasEvidence + purpose 匹配
 //
-//   行业证据弱 (top <= 1) → 返 unknown, 不猜
+// skill 唯一职责:
+//   1. 解析 rawText 里的 ### 维度标题 → 卡片
+//   2. n-gram 频次排名 → 输出 30 候选词 (结构化, 无业务假设)
+//   3. 把每张卡的"质量控制"包装成 LLM 任务包 (约束+候选+格式) 一并交给 LLM
 //
-// 用法: bot 调
-//   opphub knowledge-card --raw-text "<阶段1填好的rawText>" --json
-//   opphub knowledge-card --name "睿驰嘉禾" --raw-text "<filledRawText>" --json
-// 返 { ok, name, industry: {state, code, scores}, cards: [{type, dimension, text, evidenceSource}], unmatchedTemplates, durationMs }
+// LLM 在对话里读完直接选候选词填写证据位. skill 不替 LLM 决定什么是"对的词".
 //
-// card.type 枚举:
-//   - "ability"   能力卡片
-//   - "upstream"  上游依赖
-//   - "downstream" 下游服务
+// 用法:
+//   opphub knowledge-card --name "公司" --raw-text "<rawText>" --json
 //
-// 实现:
-//   - 本 bin 用 LLM 调 (minimax) 推断行业 + 拆卡 (skill turn 调)
-//   - 拆卡规则: rawText 命中模板词 → 拆; rawText 不命中 → 跳过, 不入库
+// 输入 rawText 期望格式 (skill 不强制, 但 heading 解析依据这个):
+//   # 公司名 · ...
+//   ## 1. 工商信息
+//   ...
+//   ## 2. 业务描述
+//   ### 维度名1
+//   自然语言描述...
+//   ### 维度名2
+//   自然语言描述...
+//   ## 3. 上游依赖 (可选, 同 heading 模式)
+//   ## 4. 下游服务 (可选)
+//   ## 5. 同行关系 (可选)
 //
-//   - 不入库 (阶段 5 才入库)
-//   - 不模板填空 — 模板 dimension/purpose 在 rawText 中无证据 → 不拆, 返 unmatchedTemplates
-//   - 不假装推断行业 — 撞同分返 ambiguous, 顶分<=1 返 weak
-//   - 不写未出现的字段 — rawText 没出现的字段不准补默认
+// 返:
+//   {
+//     ok, name, cards: [{
+//       type, dimension, description, evidenceCandidates (30 个),
+//       evidenceAnswerPrompt (LLM 任务包), text (含 <待 LLM 填写> 占位符),
+//       ...
+//     }],
+//     parsedFields: { companyName, legalPerson, registeredCapital, ... },
+//     cardCount, durationMs
+//   }
 
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -37,144 +51,180 @@ function parseArgs(argv) {
     if (a === "--json") args.json = true;
     else if (a === "--name") args.name = argv[++i];
     else if (a === "--raw-text") args.rawText = argv[++i];
-    else if (a === "--industry") args.industry = argv[++i]; // 跳过推断, 直接指定
     else if (!a.startsWith("--")) args._.push(a);
   }
   return args;
 }
 
-// 行业关键词 → 行业代码
-const INDUSTRY_SIGNALS = {
-  mcn: [
-    "短视频", "视频号", "抖音", "快手", "小红书", "B 站", "KOL", "达人", "MCN",
-    "内容制作", "代运营", "电商转化", "虚拟人", "IP 孵化", "营销", "广告投放",
-    "整合营销", "媒介", "蓝标", "京东黑珑",
-  ],
-  saas: [
-    "SaaS", "撮合", "平台", "API", "知识库", "向量检索", "AI 工具", "匹配算法",
-    "B 端", "企业服务",
-  ],
-  law: ["诉讼", "律所", "律师", "公司法", "合同审查", "知识产权", "合规咨询"],
-  mfg: ["注塑", "模具", "装配", "质检", "工艺设计", "供应链"],
-};
+// ───────────────────────────────────────────────────────────
+// rawText 解析: 把 ### heading 拆成 (type, dimension, description)
+// heading 上游/下游/同行 节 (## 3, ## 4, ## 5) 决定 type
+// 其它 (## 2 业务描述) 下的 ### heading 默认 type=ability
+// (但 ### 子标题名含 "上游/下游/同行" 也判定对应类型)
+// ───────────────────────────────────────────────────────────
+function parseRawText(rawText) {
+  if (!rawText) return { sections: [], cards: [] };
 
-const INDUSTRY_TEMPLATES = {
-  mcn: {
-    name: "MCN / 数字营销",
-    emoji: "📱",
-    abilities: [
-      { dimension: "达人营销", purpose: "KOL 投放 / 媒介代理 / KOL 资源对接" },
-      { dimension: "短视频内容制作", purpose: "视频号 / 抖音 / 小红书 视频拍摄剪辑" },
-      { dimension: "平台代运营", purpose: "视频号 / 抖音账号代运营" },
-      { dimension: "电商转化", purpose: "抖音电商 / 快手电商闭环" },
-      { dimension: "虚拟人 IP 孵化", purpose: "数字人 / IP 孵化" },
-    ],
-    upstream: [
-      { category: "KOL / 自媒体资源", desc: "双微抖音快手小红书 B 站 KOL 资源" },
-      { category: "拍摄场地 / 后期制作", desc: "影视制作 / 摄影器材 / 后期特效" },
-      { category: "数据 / BI 工具", desc: "数据中台 / BI 工具 / 数据分析" },
-    ],
-    downstream: [
-      { category: "品牌方", desc: "广告主 / 品牌营销需求方" },
-      { category: "视频号运营方", desc: "视频号生态运营方" },
-      { category: "4A 公司", desc: "传统 4A 广告公司" },
-    ],
-    peer: [
-      { category: "同业联盟", desc: "同业 MCN / 数字营销公司" },
-      { category: "同业参考", desc: "可参考的同行 / 行业标杆" },
-      { category: "关联企业", desc: "上下游 / 兄弟公司" },
-    ],
-  },
-  saas: {
-    name: "SaaS / 撮合平台",
-    emoji: "💻",
-    abilities: [
-      { dimension: "撮合引擎", purpose: "匹配算法 / 商机撮合" },
-      { dimension: "知识库", purpose: "向量检索 / 知识管理" },
-      { dimension: "AI 工具", purpose: "LLM / Agent / 工具调用" },
-      { dimension: "向量检索", purpose: "Embedding + 向量数据库" },
-    ],
-    upstream: [
-      { category: "LLM 服务", desc: "大模型 API / 推理服务" },
-      { category: "向量数据库", desc: "pgvector / Milvus / Pinecone" },
-      { category: "数据源", desc: "公开数据 / 第三方数据" },
-    ],
-    downstream: [
-      { category: "企业需求方", desc: "B 端企业 / 政府 / 机构" },
-      { category: "服务提供方", desc: "服务商 / 供应商 / 个人专家" },
-    ],
-  },
-  unknown: {
-    name: "通用",
-    emoji: "❓",
-    abilities: [
-      { dimension: "核心业务", purpose: "公司主营 / 产品" },
-    ],
-    upstream: [
-      { category: "上游依赖", desc: "公司需要的资源 / 服务" },
-    ],
-    downstream: [
-      { category: "下游服务", desc: "公司服务的客户 / 用户" },
-    ],
-  },
-};
+  // 通用关键词映射 (按标题中的关键字判定类型, 不写死行业词)
+  function inferTypeFromTitle(title) {
+    if (/上游|我的依赖|依赖/.test(title)) return "upstream";
+    if (/下游|我想找|客户|服务方/.test(title)) return "downstream";
+    if (/同[行业]|同行|同业|竞品|对标|参考/.test(title)) return "peer";
+    return "ability";
+  }
 
-// 从 rawText 抽结构化字段 (公司基础信息)
-// v4.0.9 新增: 跟 server 端 OpcKnowledgeEntry.parsedFields 字段对应
-// v5.0.0 新增: 同时输出 _sources (顶层字段多源结构, 给 computeCurrentFields 用)
-function extractParsedFields(name, rawText, industry) {
+  const sections = [];
+  const lines = rawText.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const h2 = line.match(/^##\s+(.+?)\s*$/);
+    if (!h2) { i++; continue; }
+    const sectionTitle = h2[1].trim();
+    const sectionType = inferTypeFromTitle(sectionTitle);
+
+    // 在这个 ## 块里找所有 ### 子标题
+    let j = i + 1;
+    while (j < lines.length) {
+      const h3 = lines[j].match(/^###\s+(.+?)\s*$/);
+      if (h3) {
+        const dimension = h3[1].trim();
+        // 抓取内容直到下一个 ### 或 ## 或 文件尾
+        let k = j + 1;
+        const contentLines = [];
+        while (k < lines.length) {
+          const l = lines[k];
+          if (l.match(/^#{1,3}\s/)) break;
+          contentLines.push(l);
+          k++;
+        }
+        const description = contentLines.join("\n").trim();
+        // ### 子标题名也可决定类型 (e.g. ## 2 下, ## ### 上游依赖 → upstream)
+        const dimType = inferTypeFromTitle(dimension);
+        const finalType = dimType !== "ability" ? dimType : sectionType;
+        sections.push({ sectionTitle, type: finalType, dimension, description });
+        j = k;
+      } else {
+        j++;
+      }
+    }
+    i = j;
+  }
+  return { sections };
+}
+
+// ───────────────────────────────────────────────────────────
+// n-gram 候选词提取 (纯结构, 不假设业务词)
+//   - 标点切分
+//   - 2-8 字长度
+//   - 频次排名
+// ───────────────────────────────────────────────────────────
+function extractEvidenceCandidates(description) {
+  if (!description) return [];
+  const freq = new Map();
+
+  // 拆标点 + 空白
+  const tokens = description.split(/[,，。、；：:.\s\n]+/).filter(Boolean);
+
+  for (const tok of tokens) {
+    // 单 token 本身: 2-8 字, 含中文或英文, 不纯数字
+    if (tok.length >= 2 && tok.length <= 8) {
+      if (!/^\d+$/.test(tok)) {
+        freq.set(tok, (freq.get(tok) || 0) + 1);
+      }
+    }
+    // 长 token 滑动窗口: 切 2-8 字 n-gram
+    if (tok.length > 8) {
+      for (let i = 0; i <= tok.length - 2; i++) {
+        for (let n = 2; n <= 8 && i + n <= tok.length; n++) {
+          const w = tok.slice(i, i + n);
+          if (/^\d+$/.test(w)) continue;
+          freq.set(w, (freq.get(w) || 0) + 1);
+        }
+      }
+    }
+  }
+
+  // 排序: 频次降序, 长度降序, 取前 30 候选
+  return [...freq.entries()]
+    .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
+    .slice(0, 30)
+    .map(([term]) => term);
+}
+
+// ───────────────────────────────────────────────────────────
+// LLM 任务包: 一次性把约束 + 候选 + 输出格式 给到大模型
+// ───────────────────────────────────────────────────────────
+function buildAnswerPrompt(type, dimension, description, candidates) {
+  return [
+    `## LLM 任务 (一次性完成)`,
+    `你是偶合录入的 LLM 助理. 本张卡片由 skill 自动生成, 证据词由你做最后质量把控.`,
+    ``,
+    `卡片主题: ${type}.${dimension}`,
+    `描述: ${description || "(rawText 里没找到独立的描述段)"}`,
+    `候选词 (skill 从描述里 n-gram 频次排名得出, ${candidates.length} 个): ${candidates.join(", ")}`,
+    ``,
+    `你的选择规则:`,
+    `- 必须从候选词列表里挑, 不准生造 (生造词会脱离 rawText 原意)`,
+    `- 挑 3-5 个最直接相关 "${dimension}" 主题的`,
+    `- 不要的: 与 ${dimension} 主题不符的 / 通用动词残留 / 噪音字符`,
+    `- 兜底: 如候选全不相关, 回退 ["${dimension}"] 自身`,
+    ``,
+    `输出严格按 JSON 格式 (直接 print 到 stdout, 不要 markdown 代码块包裹):`,
+    `{`,
+    `  "evidence": ["kw1", "kw2", "kw3"]`,
+    `}`,
+  ].join("\n");
+}
+
+// ───────────────────────────────────────────────────────────
+// 公司结构化字段 (从 ## 1. 工商信息 节 + ## 2. 业务描述 节 抽)
+// ───────────────────────────────────────────────────────────
+function extractParsedFields(name, rawText) {
   const ingestedAt = new Date().toISOString();
   const source = `im:skill-extract:${ingestedAt}`;
+  const pairs = [["companyName", name]];
 
-  // (key, value) 配对, 顶层 + _sources 同步构造避免漂移
-  const pairs = [];
+  const fields = ["法人", "注册资本", "信用代码", "统一社会信用代码",
+                  "团队规模", "规模", "人数", "地址"];
+  for (const f of fields) {
+    const m = rawText.match(new RegExp(`${f}[:：]\\s*([^\\n]+)`));
+    if (m) {
+      const key = ({
+        "法人": "legalPerson",
+        "注册资本": "registeredCapital",
+        "信用代码": "creditCode",
+        "统一社会信用代码": "creditCode",
+        "团队规模": "teamSize",
+        "规模": "teamSize",
+        "人数": "teamSize",
+        "地址": "address",
+      })[f];
+      if (key && !pairs.find(p => p[0] === key)) {
+        const v = m[1].trim();
+        const limit = key === "address" ? 100 : 50;
+        pairs.push([key, v.slice(0, limit)]);
+      }
+    }
+  }
 
-  // 公司名
-  pairs.push(["companyName", name]);
-
-  // 行业
-  if (industry) pairs.push(["industry", { code: industry.code, name: industry.name }]);
-
-  // 法律实体
-  const legalPersonMatch = rawText.match(/法人[:：]\s*([^\n]+)/);
-  if (legalPersonMatch) pairs.push(["legalPerson", legalPersonMatch[1].trim().slice(0, 50)]);
-
-  // 注册资本
-  const capitalMatch = rawText.match(/注册资本[:：]\s*([^\n]+)/);
-  if (capitalMatch) pairs.push(["registeredCapital", capitalMatch[1].trim().slice(0, 50)]);
-
-  // 信用代码
-  const creditMatch = rawText.match(/(?:信用代码|统一社会信用代码)[:：]\s*([A-Z0-9]{18,20})/);
-  if (creditMatch) pairs.push(["creditCode", creditMatch[1].trim()]);
-
-  // 团队规模
-  const sizeMatch = rawText.match(/(?:团队规模|规模|人数)[:：]\s*([^\n]+)/);
-  if (sizeMatch) pairs.push(["teamSize", sizeMatch[1].trim().slice(0, 50)]);
-
-  // 地址
-  const addressMatch = rawText.match(/地址[:：]\s*([^\n]+)/);
-  if (addressMatch) pairs.push(["address", addressMatch[1].trim().slice(0, 100)]);
-
-  // 城市 (只从地址字段或工商信息节识别, 避免同业联盟里的地名干扰)
-  let city = "";
+  // 城市限定: 地址字段 || 工商信息节
   const addressField = pairs.find(p => p[0] === "address")?.[1] || "";
   const bizSection = rawText.match(/##\s*1\.\s*工商信息\s*\n+([\s\S]*?)(?=\n##\s|\s*$)/);
   const searchText = addressField || (bizSection ? bizSection[1] : "");
   const cities = ["上海", "北京", "深圳", "广州", "杭州", "成都", "南京", "武汉", "苏州", "天津", "重庆"];
   for (const c of cities) {
-    if (searchText.includes(c)) { city = c; break; }
+    if (searchText.includes(c)) { pairs.push(["city", c]); break; }
   }
-  if (city) pairs.push(["city", city]);
 
-  // 业务描述 (取 ## 2. 业务描述 段)
+  // 业务描述: ## 2. 业务描述 整段
   const bizMatch = rawText.match(/##\s*2\.\s*业务描述\s*\n+([\s\S]*?)(?=\n##\s|\s*$)/);
   if (bizMatch) pairs.push(["businessDescription", bizMatch[1].trim().slice(0, 500)]);
 
-  // 同步构造顶层字段 + _sources (key 一一对应)
-  const fields = {};
+  const fieldsObj = {};
   const sources = {};
   for (const [key, value] of pairs) {
-    fields[key] = value;
+    fieldsObj[key] = value;
     sources[key] = {
       current: value,
       userOverride: null,
@@ -182,237 +232,63 @@ function extractParsedFields(name, rawText, industry) {
       candidates: [{ value, source, sourceType: "im", ingestedAt }],
     };
   }
-  fields._sources = sources;
-  return fields;
+  fieldsObj._sources = sources;
+  return fieldsObj;
 }
 
-// v4.0.9: 生成 4 种 entryType 全部的确认清单
-// 用途: 供 IM bot 给用户发「将要录入什么」的清单
-function buildConfirmationList(name, industry, cards, parsedFields) {
-  const groups = {
-    ability: { label: "我能提供", emoji: "✅", items: [] },
-    downstream: { label: "我想找", emoji: "🔍", items: [] },
-    upstream: { label: "我的依赖", emoji: "⬆️", items: [] },
-    peer: { label: "同行关系", emoji: "🔗", items: [] },
-  };
-  for (const c of cards) {
-    if (groups[c.type]) {
-      groups[c.type].items.push({
-        dimension: c.dimension,
-        evidenceSource: c.evidenceSource ?? "rawText 关键词命中",
-      });
-    }
-  }
-
-  // 把空组去掉, 只列有内容的
-  const nonEmpty = Object.entries(groups).filter(([_, g]) => g.items.length > 0);
-
-  return {
-    name,
-    industry: industry ? { code: industry.code, name: industry.name } : null,
-    companyName: parsedFields?.companyName ?? name,
-    businessDescription: parsedFields?.businessDescription ?? null,
-    totalCards: cards.length,
-    groups: nonEmpty.map(([type, g]) => ({ type, label: g.label, emoji: g.emoji, items: g.items })),
-    instructions: "回复「确认」入库；回复「删 <type.dimension>」去掉某条；回复「重抽」回到阶段 1",
-  };
-}
-
-// 推断行业 (基于 rawText 关键词匹配)
-function inferIndustry(rawText) {
-  const scores = {};
-  for (const [code, keywords] of Object.entries(INDUSTRY_SIGNALS)) {
-    scores[code] = 0;
-    for (const kw of keywords) {
-      const matches = (rawText.match(new RegExp(kw, "g")) || []).length;
-      scores[code] += matches;
-    }
-  }
-  // 排序找 top 2
-  const ranked = Object.entries(scores)
-    .map(([code, score]) => ({ code, score }))
-    .sort((a, b) => b.score - a.score);
-  const top = ranked[0] || { code: "unknown", score: 0 };
-  const second = ranked[1] || { code: "unknown", score: 0 };
-
-  // 三种状态:
-  // 1. 顶分 <= 1 → 证据弱, 返 unknown + warning
-  // 2. 顶分 == 第二名 → 撞分, 返 ambiguous (不准 pick one)
-  // 3. 顶分 > 第二名 + >= 2 → 唯一胜出, 返 code
-  let state = "decided";
-  let code = top.code;
-  if (top.score <= 1) {
-    state = "weak";
-    code = "unknown";
-  } else if (top.score === second.score && top.score >= 2) {
-    state = "ambiguous";
-    code = "ambiguous";
-  }
-  return { code, state, scores, topTwo: ranked.slice(0, 2) };
-}
-
-// 按模板 + rawText 拆卡
-// 改: 返回 { cards, unmatchedTemplates }, unmatchedTemplates 列出模板里有但 rawText 没证据的
-function generateCards(name, industryCode, rawText) {
-  const template = INDUSTRY_TEMPLATES[industryCode] || INDUSTRY_TEMPLATES.unknown;
+// ───────────────────────────────────────────────────────────
+// 主生成函数
+// ───────────────────────────────────────────────────────────
+function generateCards(name, rawText) {
+  const { sections } = parseRawText(rawText);
   const cards = [];
-  const unmatchedTemplates = [];
-  const lowerText = rawText || "";
 
-  // 通用模板词 (粗粒度, 准不准 bot 看完让人工拍)
-  const GENERIC_TERMS = new Set([
-    "营销", "广告投放", "SaaS", "撮合", "平台", "API", "数字", "运营", "服务",
-  ]);
+  for (const sec of sections) {
+    const description = sec.description;
+    const candidates = extractEvidenceCandidates(description);
+    const answerPrompt = buildAnswerPrompt(sec.type, sec.dimension, description, candidates);
 
-  function hasEvidence(dimension, purpose) {
-    // 1. 先查模板 purpose 具体关键词 → 命中给丰富证据词
-    if (purpose) {
-      const wordHits = [];
-      const tokens = purpose.split(/[/、,; \n]+/).filter(t => t.trim().length >= 2);
-      for (const t of tokens) {
-        const trimmed = t.trim();
-        if (GENERIC_TERMS.has(trimmed)) continue;
-        if (lowerText.includes(trimmed)) wordHits.push(trimmed);
-      }
-      if (wordHits.length >= 1) {
-        return { ok: true, source: "purpose_keyword_match", evidence: [...new Set(wordHits)] };
-      }
-    }
-    // 2. 兜底: dimension 词出现也能匹配, 但证据词质量低
-    if (dimension && lowerText.includes(dimension)) return { ok: true, source: "dimension_match" };
-    return { ok: false };
-  }
+    // rawText 占位符: <待 LLM 填写>, 让 LLM 在对话里把 (证据词: ...) 整行替换
+    const labelMap = { ability: "能力卡片", upstream: "上游依赖", downstream: "下游服务", peer: "同行关系" };
+    const label = labelMap[sec.type] || sec.type;
+    const cardText = description
+      ? `<!-- opphub-raw-text-v1 -->\n${name} · ${label} · ${sec.dimension}\n\n描述: ${description}\n\n(证据词: <待 LLM 填写>)`
+      : `<!-- opphub-raw-text-v1 -->\n${name} · ${label} · ${sec.dimension}\n\n(描述: rawText 里没找到该维度的独立描述段)\n\n(证据词: <待 LLM 填写>)`;
 
-  function escapeRegex(s) {
-    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
-
-  function extractDimDesc(rawText, dim) {
-    const paren = rawText.match(new RegExp(`${escapeRegex(dim)}\\s*\\(([^)]+)\\)`));
-    if (paren) return paren[1].trim();
-    const colon = rawText.match(new RegExp(`${escapeRegex(dim)}\\s*[:：]\\s*(.+)`));
-    if (colon) return colon[1].trim().slice(0, 200);
-    const heading = rawText.match(new RegExp(`###+\\s*${escapeRegex(dim)}\\s*\\n([\\s\\S]*?)(?=\\n###|\\n##|\\n#\\s|$)`));
-    if (heading) return heading[1].trim().slice(0, 300);
-    const line = rawText.split("\n").find(l => l.includes(dim) && !l.startsWith("#") && !l.startsWith("(") && !l.startsWith(")"));
-    if (line) return line.trim().replace(/^[^:：]*[:：]?\s*/, "").slice(0, 200);
-    return null;
-  }
-
-  // 从自然语言描述里挖关键词当证据词
-  const PLATFORM_TERMS = [
-    "抖音", "快手", "小红书", "B站", "视频号", "微博", "微信公众号", "TikTok",
-    "YouTube", "Facebook", "Instagram", "Twitter", "LinkedIn", "豆瓣", "知乎",
-  ];
-
-  function extractEvidenceFromDesc(cardDesc, dim) {
-    if (!cardDesc) return dim;
-    const hits = [];
-    const seen = new Set();
-    const add = (term) => {
-      if (!term || term.length < 2 || term.length > 8) return;
-      if (/^[\d%]/.test(term)) return;
-      if (term === dim || GENERIC_TERMS.has(term)) return;
-      if (seen.has(term)) return;
-      seen.add(term);
-      hits.push(term);
-    };
-
-    // 1) 平台名等高优先关键词 (单跑一过, 强相关)
-    for (const p of PLATFORM_TERMS) {
-      if (cardDesc.includes(p)) add(p);
-    }
-
-    // 2) 标点拆分 (不用 \s 是因为 "合作" 等词内部不该断)
-    const fragments = cardDesc.split(/[,，、。；：:]+/);
-    for (const f of fragments) {
-      let t = f.trim()
-        .replace(/[，。、；：:]+$/, "")
-        .replace(/(等主流平台|等核心资源|等服务|等服务$|等业务|等业务$|等等|行业|领域|方面|场景|赛道|玩法|业务|服务|平台|资源)$/, "")
-        .replace(/(等等|行业|领域|方面|场景|赛道|玩法|业务|等)$/, "")
-        .replace(/^(包括|比如|例如|以及|排除|除外|同时|其他|等)/, "")
-        .replace(/^[是从到为全由覆盖涵盖含以及在之对其按]+/, "")
-        .replace(/^(我们|你|他|她|它)+/, "");  // 剥人称前缀
-      if (t.length < 2 || t.length > 8) continue;
-      if (/^[\d%]/.test(t) || /^[a-zA-Z]{3,}$/.test(t)) continue;
-      // 过滤纯人称单字/助词 (的, 了, 吗, 我们, 你们...)
-      if (/^(我们|你们|他们|她们|它们|的了呢吧嘛)$/.test(t)) continue;
-      if (t === dim || GENERIC_TERMS.has(t)) continue;
-      add(t);
-    }
-    return hits.length > 0 ? hits.slice(0, 10).join(", ") : dim;
-  }
-
-  function buildCard(type, dim, emoji) {
-    const label = {
-      ability: "能力卡片",
-      upstream: "上游依赖",
-      downstream: "下游服务",
-    }[type] || type;
-
-    const cardDesc = extractDimDesc(rawText, dim);
-    const evidenceWords = extractEvidenceFromDesc(cardDesc, dim);
-    const evidenceNote = cardDesc ? `\n\n(证据词: ${evidenceWords})` : "";
-    const descLines = [];
-    if (cardDesc) descLines.push(`描述: ${cardDesc}`);
-
-    const text = descLines.length > 0
-      ? `<!-- opphub-raw-text-v1 -->\n${name} · ${label} · ${dim}\n\n${descLines.join("\n")}${evidenceNote}`
-      : `<!-- opphub-raw-text-v1 -->\n${name} · ${label} · ${dim}${evidenceNote}\n\n(来自 rawText 实查, 非模板填空)`;
-
-    return { type, dimension: dim, emoji, text };
-  }
-
-  function recordUnmatch(type, dim, purpose) {
-    unmatchedTemplates.push({
-      type,
-      dimension: dim,
-      templatePurpose: purpose,
-      reason: "rawText 没找到模板词的证据 — 模板填空会被禁, 不要入库这条",
+    cards.push({
+      type: sec.type,
+      dimension: sec.dimension,
+      description,
+      evidenceCandidates: candidates,
+      evidenceAnswerPrompt: answerPrompt,
+      text: cardText,
     });
   }
 
-  // 能力卡片 (自然语言描述中有维度名就出卡, 证据词从描述中挖)
-  for (const ab of template.abilities) {
-    if (lowerText.includes(ab.dimension)) {
-      cards.push(buildCard("ability", ab.dimension, "✅"));
-    } else {
-      recordUnmatch("ability", ab.dimension, ab.purpose);
-    }
-  }
-
-  // 上游依赖
-  for (const up of template.upstream) {
-    if (lowerText.includes(up.category)) {
-      cards.push(buildCard("upstream", up.category, "⬆️"));
-    } else {
-      recordUnmatch("upstream", up.category, up.desc);
-    }
-  }
-
-  // 下游服务
-  for (const dn of template.downstream) {
-    if (lowerText.includes(dn.category)) {
-      cards.push(buildCard("downstream", dn.category, "⬇️"));
-    } else {
-      recordUnmatch("downstream", dn.category, dn.desc);
-    }
-  }
-
-  // 同行关系 (peer)
-  if (Array.isArray(template.peer)) {
-    for (const p of template.peer) {
-      if (lowerText.includes(p.category)) {
-        cards.push(buildCard("peer", p.category, "🔗"));
-      } else {
-        recordUnmatch("peer", p.category, p.desc);
-      }
-    }
-  }
-
-  return { cards, unmatchedTemplates };
+  return { cards, sectionsCount: sections.length };
 }
 
+// ───────────────────────────────────────────────────────────
+// LLM 总任务包 (整个公司级别, 一次性交付)
+// ───────────────────────────────────────────────────────────
+function buildGlobalPrompt(name, cards) {
+  return [
+    `## LLM 任务 (一次性完成: 给所有卡片选证据词)`,
+    `你是偶合录入的 LLM 助理. skill 已从 "${name}" 的 rawText 拆出 ${cards.length} 张卡片, 每张卡的证据词由你做最后质量把控.`,
+    ``,
+    `流程:`,
+    `1. 逐卡读 cards[].description + cards[].evidenceCandidates`,
+    `2. 按 cards[].evidenceAnswerPrompt 里的规则, 给每张卡的 "evidence" 字段赋值`,
+    `3. 把 cards[i].text 里的 "(证据词: <待 LLM 填写>)" 整行替换为 "(证据词: kw1, kw2, kw3)"`,
+    `4. 调用 opphub knowledge-submit --cards <填写完整 rawText 的 cards.json>`,
+    ``,
+    `⚠️ 切勿分成 "skill 先输出 → 等用户确认 → 再审" 的多步流程. skill 给的本题包已含 evidenceCandidates, 你读 + 选 + 重写 + 提交, 一次性完成.`,
+  ].join("\n");
+}
+
+// ───────────────────────────────────────────────────────────
+// main
+// ───────────────────────────────────────────────────────────
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const wantJson = args.json;
@@ -421,135 +297,52 @@ async function main() {
     const result = {
       ok: false,
       error: "missing_raw_text",
-      message: "需要 --raw-text (阶段 1 discover 填好的)",
+      message: "需要 --raw-text (stage 1 discover 填好的)",
+      nextStep: "opphub knowledge-card --raw-text '<filled rawText>' --json",
     };
     if (wantJson) console.log(JSON.stringify(result, null, 2));
-    process.exit(1);
+    else console.error(result.message);
+    return;
   }
 
   const t0 = Date.now();
   const name = args.name || extractNameFromRawText(args.rawText);
-
-  // 行业推断 (如果没指定)
-  let industryCode = args.industry;
-  let industryState = "user_specified";
-  let industryScores;
-  let topTwo = null;
-  if (!industryCode) {
-    const inferred = inferIndustry(args.rawText);
-    industryCode = inferred.code;
-    industryState = inferred.state;
-    industryScores = inferred.scores;
-    topTwo = inferred.topTwo;
-  }
-
-  // 行业撞分 / 证据弱 → 不准拆卡, C2 修复: 返 askInteractive (不 process.exit)
-  //
-  // v4.0.0 P0-4: 歧义分支输出后立即 return, 不再继续 generateCards
-  //   之前漏 return → INDUSTRY_TEMPLATES[industryCode='ambiguous'] fallback 到 'unknown'
-  //   → 继续 generateCards → stdout 出 2 份 JSON (一份 ambiguity, 一份空 cards)
-  //   → bot 拿 JSON.parse(stdout) 失败
-  if (industryCode === "ambiguous" || industryState === "weak") {
-    // 拼 askInteractive options (industry_ambiguous 时是 topTwo; industry_weak 时是 5 个可选项)
-    const options = [];
-    if (industryCode === "ambiguous" && topTwo) {
-      for (const t of topTwo) {
-        options.push({
-          id: t.code,
-          label: `${INDUSTRY_TEMPLATES[t.code]?.emoji ?? "?"} ${INDUSTRY_TEMPLATES[t.code]?.name ?? t.code}`,
-        });
-      }
-    } else {
-      for (const code of ["mcn", "saas", "law", "mfg", "unknown"]) {
-        options.push({
-          id: code,
-          label: `${INDUSTRY_TEMPLATES[code]?.emoji ?? "?"} ${INDUSTRY_TEMPLATES[code]?.name ?? code}`,
-        });
-      }
-    }
-    const result = {
-      ok: false,
-      error: industryCode === "ambiguous" ? "industry_ambiguous" : "industry_weak_evidence",
-      message: industryCode === "ambiguous"
-        ? "rawText 多行业信号撞同分, skill 不准 pick one — 需维护者拍实际行业"
-        : "rawText 行业信号太弱 (顶分<=1), skill 不准猜 — 需维护者拍行业",
-      name,
-      industry: { state: industryState, scores: industryScores, topTwo },
-      cards: [],
-      unmatchedTemplates: [],
-      askInteractive: true,                // C2 补: 返 askInteractive 而不是 process.exit
-      options,                              // bot 走 askInteractive 时用
-      actions: [                            // bot 拿 actions 拼 "重跑" 按钮 payload
-        { id: "skip",  label: "跳过 (不拆卡)",   style: "danger" },
-      ],
-      nextStep: "ask user 选行业, 然后 bot 重跑: opphub knowledge-card --raw-text <rawText> --industry <pickedCode> --json",
-    };
-    if (wantJson) {
-      console.log(JSON.stringify(result, null, 2));
-    } else {
-      console.log(JSON.stringify(result, null, 2));
-    }
-    // v4.0.0 P0-4: 立即 return, 不再继续 generateCards 产生第 2 份 JSON
-    return;
-  }
-
-  const template = INDUSTRY_TEMPLATES[industryCode] || INDUSTRY_TEMPLATES.unknown;
-  const { cards, unmatchedTemplates } = generateCards(name, industryCode, args.rawText);
-
-  const fields = extractParsedFields(name, args.rawText, { code: industryCode, name: template.name });
+  const { cards } = generateCards(name, args.rawText);
+  const fields = extractParsedFields(name, args.rawText);
 
   const result = {
     ok: cards.length > 0,
-    warning: cards.length === 0 ? "rawText 跟所有行业模板都无证据命中, skill 不准瞎填, 空入库不允许" : (unmatchedTemplates.length > 0 ? `有 ${unmatchedTemplates.length} 条模板字段因无证据未拆 (见 unmatchedTemplates) — 这些不准入库` : null),
+    warning: cards.length === 0 ? "rawText 里没解析到任何 ### heading, 没法拆卡 — 检查 rawText 格式或重新跑 discover" : null,
     name,
-    industry: {
-      state: industryState,
-      code: industryCode,
-      name: template.name,
-      emoji: template.emoji,
-      scores: industryScores,
-    },
     cards,
     parsedFields: fields,
-    confirmation: buildConfirmationList(name, { code: industryCode, name: template.name }, cards, fields),
     cardCount: cards.length,
-    unmatchedTemplates,
-    unmatchedCount: unmatchedTemplates.length,
     durationMs: Date.now() - t0,
+    llmInstruction: buildGlobalPrompt(name, cards),
     nextStep: cards.length === 0
-      ? "skill 不准瞎填, 必须拿更多 rawText 重跑, 或人工给出 --cards-template"
-      : "knowledge-ingest-batch --cards <cards.json>",
+      ? "检查 rawText 格式, 在 ## 2. 业务描述 节用 ### heading 列维度"
+      : "LLM 读 llmInstruction + cards[].evidenceAnswerPrompt, 逐卡填 (证据词:) 占位符, 然后调用 opphub knowledge-submit --cards <填写完成 cards.json>",
   };
 
   if (cards.length === 0) {
-    result.error = "no_evidence_cards";
-    result.ok = false;
+    result.error = "no_section_headings_found";
   }
 
   if (wantJson) {
     console.log(JSON.stringify(result, null, 2));
-    if (!result.ok) process.exit(1);
   } else {
-    console.log(`📋 ${name} · 行业: ${template.emoji} ${template.name} (state: ${industryState})`);
-    console.log(`拆出 ${cards.length} 条 cards (rawText 证据命中), 跳过 ${unmatchedTemplates.length} 条 (无证据, 不入库):\n`);
+    console.log(`📋 ${name}: ${cards.length} 张卡片 (parsed from ### heading)`);
     for (const c of cards) {
-      console.log(`  ${c.emoji} [${c.type}] ${c.dimension}`);
-    }
-    if (unmatchedTemplates.length > 0) {
-      console.log(`\n⚠️  跳过 (rawText 无证据, 模板填空被禁):`);
-      for (const u of unmatchedTemplates) {
-        console.log(`  ❌ [${u.type}] ${u.dimension}`);
-      }
+      console.log(`  ${c.type === "ability" ? "✅" : c.type === "upstream" ? "⬆️" : c.type === "downstream" ? "⬇️" : "🔗"} [${c.type}] ${c.dimension} — 候选 ${c.evidenceCandidates.length} 个`);
     }
     console.log(`\n下一步: ${result.nextStep}`);
   }
-  if (cards.length === 0) process.exit(1);
+  if (cards.length === 0 && wantJson) process.exit(1);
 }
 
-// 从 rawText 第一行提取公司名 (阶段 1 骨架格式 "# Xxx · 自动画像")
 function extractNameFromRawText(rawText) {
-  const match = rawText.match(/^#\s+(.+?)\s+·/);
-  return match ? match[1].trim() : "(未指定公司名)";
+  const m = (rawText || "").match(/^#\s+(.+?)\s+·/);
+  return m ? m[1].trim() : "(未指定公司名)";
 }
 
 main().catch((e) => {

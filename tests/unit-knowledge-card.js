@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 //
-// unit tests for opphub-knowledge-card.js · v4.0.9
+// unit tests for opphub-knowledge-card.js · v5.0
 // 覆盖:
-//   - extractEvidenceFromDesc (从描述挖证据词)
-//   - extractDimDesc (从 rawText 抽维度描述)
-//   - extractParsedFields (公司级结构化字段)
-//     重点: 城市检测不应被同业联盟里的地名干扰
+//   - parseRawText: 把 ### heading 拆成 (type, dimension, description)
+//   - extractEvidenceCandidates: 纯 n-gram 频次排名, 无词表
+//   - extractParsedFields: 工商信息节抽取 (法人/注册资本/城市)
+//   - 占位符: rawText 含 <待 LLM 填写>
 //
-// 通过 spawn 卡生成 CLI, 读 rawText + 期望关键词, 验证出卡正确
+// 通过 spawn 卡生成 CLI, 读 rawText + 期望字段, 验证出卡正确.
 //
 // 用法: node --test tests/unit-knowledge-card.js
-//   或: npm test -- tests/unit-knowledge-card.js
 
 import test from "node:test";
 import assert from "node:assert";
+import { readFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -22,242 +22,189 @@ import { dirname, join } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CARD_BIN = join(__dirname, "..", "bin", "opphub-knowledge-card.js");
 const SKILL_CWD = join(__dirname, "..");
+const CARD_SOURCE = readFileSync(CARD_BIN, "utf8")
+  // 去掉 // 行注释, 剩下的才视为可执行代码
+  .split("\n").filter(l => !l.trim().startsWith("//")).join("\n");
 const execFileP = promisify(execFile);
 
 async function runCard(name, rawText) {
-  const { stdout } = await execFileP("node", [
-    CARD_BIN,
-    "--name", name,
-    "--raw-text", rawText,
-    "--json",
-  ], { cwd: SKILL_CWD, timeout: 15000 });
+  const { stdout } = await execFileP(
+    "node",
+    [CARD_BIN, "--name", name, "--raw-text", rawText, "--json"],
+    { cwd: SKILL_CWD, timeout: 15000 },
+  );
   return JSON.parse(stdout.toString());
 }
 
-function getCard(cards, type, dim) {
-  return cards.find(c => c.type === type && c.dimension === dim);
+function getCard(cards, dimension) {
+  return cards.find(c => c.dimension === dimension);
 }
 
-function extractEvidence(card) {
-  const m = card?.text?.match(/\(证据词:\s*(.+?)\)/);
-  return m ? m[1].trim() : null;
-}
+// ────────────────────────────────────────────────────────────
+// 通用性保证: 源码绝对不许有业务词
+// ────────────────────────────────────────────────────────────
+test("通用性: 源码不许写业务词表 (平台/服务/MCN)", () => {
+  const forbidden = [
+    "抖音", "快手", "小红书", "B 站",
+    "MCN", "SaaS", "撮合引擎", "向量检索",
+    "达人营销", "短视频内容制作", "平台代运营", "电商转化",
+    "PLATFORM_TERMS", "TAIL_GENERIC", "MID_GENERIC", "GENERIC_TERMS",
+    "INDUSTRY_TEMPLATES", "INDUSTRY_SIGNALS",
+  ];
+  const leaks = forbidden.filter(w => CARD_SOURCE.includes(w));
+  assert.strictEqual(leaks.length, 0, `源码含业务词硬编码: ${leaks.join(", ")}`);
+});
 
-// ──────────────────────────────────────────────────────────────
-// extractEvidenceFromDesc
-// ──────────────────────────────────────────────────────────────
-test("extractEvidenceFromDesc: 拆分自然语言描述为关键词", async () => {
-  const d = await runCard("上海睿驰嘉禾", `
-# 上海睿驰嘉禾数字传媒 · 测试
-
+// ────────────────────────────────────────────────────────────
+// parseRawText: ### heading 拆解
+// ────────────────────────────────────────────────────────────
+test("parseRawText: ## 2. 业务描述 节下 ### 子标题全部出 ability 卡", async () => {
+  const d = await runCard("上海睿驰", `
 ## 2. 业务描述
 ### 达人营销
-全链条达人营销服务: 从达人筛选、商务谈判、内容共创到投放执行与效果复盘。累计合作500+达人, 覆盖抖音、快手、小红书、B站等主流平台。KOL投放单次5-50万, 媒介代理服务费10-15%。
-`);
-  const card = getCard(d.cards, "ability", "达人营销");
-  assert.ok(card, "达人营销 卡必须存在");
-  const ev = extractEvidence(card);
-  assert.ok(ev, "必须含 (证据词: ...)");
-
-  const kws = ev.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-  // 必须有: 达人筛选, 商务谈判, 抖音, 快手, 小红书
-  for (const must of ["达人筛选", "商务谈判"]) {
-    assert.ok(kws.includes(must), `必须包含 "${must}", 实际: ${kws.join(",")}`);
-  }
-  // 不应该出现数字开头的片段
-  assert.ok(!kws.some(k => /^[\d%]/.test(k)), `不应有数字开头: ${kws.join(",")}`);
-  // 不应该有超过 8 字的片段
-  assert.ok(!kws.some(k => k.length > 8), `不应有 >8 字片段: ${kws.join(",")}`);
-});
-
-test("extractEvidenceFromDesc: 滤掉前导停用字 (从/到/为/覆盖/含等)", async () => {
-  const d = await runCard("测试公司", `
-# 测试公司 · 测试
-
-## 2. 业务描述
+从达人筛选, 商务谈判到投放执行。覆盖抖音等平台。
 ### 短视频内容制作
-从脚本策划到拍摄剪辑全流程制作, 涵盖抖音、快手、小红书平台。
+月产 100+ 条短视频。
 `);
-  const card = getCard(d.cards, "ability", "短视频内容制作");
-  const kws = extractEvidence(card).split(/[,，]/).map(s => s.trim());
-  for (const k of kws) {
-    assert.ok(!/^[从到为全覆盖含及其]+/.test(k), `不应以停用字开头: "${k}"`);
-  }
+  assert.strictEqual(d.cards.length, 2);
+  assert.strictEqual(d.cards[0].type, "ability");
+  assert.strictEqual(d.cards[0].dimension, "达人营销");
+  assert.strictEqual(d.cards[1].dimension, "短视频内容制作");
 });
 
-test("extractEvidenceFromDesc: 拆不出有效关键词时降级到 dim 自身", async () => {
-  const d = await runCard("测试公司2", `
-# 测试公司2 · 测试
-
-## 2. 业务描述
-### 虚拟人 IP 孵化
-一句话总结但是没有任何标点和关键词。
-`);
-  const card = getCard(d.cards, "ability", "虚拟人 IP 孵化");
-  assert.ok(card, "卡必须存在 (lowerText.includes 维度名命中)");
-  // 描述只有一个长句子, 切不出有意义的 2-6 字片段
-  // 证据词会降级为 dim 自身
-  const ev = extractEvidence(card);
-  assert.ok(ev === "虚拟人 IP 孵化" || !/[,，]/.test(ev),
-    `降级时不应含逗号, 实际: "${ev}"`);
-});
-
-test("extractEvidenceFromDesc: 字母数字片段被过滤 (GMV, 5-10%)", async () => {
-  const d = await runCard("测试公司3", `
-# 测试公司3 · 测试
-
-## 2. 业务描述
-### 电商转化
-从内容种草到直播带货, 抖音电商服务费GMV的5-10%, 直播带货按坑位费加佣金。
-`);
-  const card = getCard(d.cards, "ability", "电商转化");
-  const kws = extractEvidence(card).split(/[,，]/).map(s => s.trim());
-  // 不应有 GMV, 5-10%, 之类
-  assert.ok(!kws.some(k => /^[GMV]+\d*$/.test(k) || /^\d/.test(k)),
-    `数字/纯字母片段应被过滤: ${kws.join(",")}`);
-});
-
-// ──────────────────────────────────────────────────────────────
-// extractParsedFields - 城市检测不被同业联盟里的 "北京" 干扰
-// ──────────────────────────────────────────────────────────────
-test("extractParsedFields city: 只看地址/工商信息节, 同业联盟里 '北京' 不污染", async () => {
-  const d = await runCard("湖北紫冠科技有限公司", `
-# 湖北紫冠科技有限公司 · 测试
-
-## 1. 工商信息
-公司名称: 湖北紫冠科技有限公司
-地址: 湖北省武汉市东湖高新区
-
-## 2. 业务描述
+test("parseRawText: ### 上游/下游/同业 类型自动判定", async () => {
+  const d = await runCard("上海睿驰", `
+## 业务描述
+### 达人营销
+xxx
+### 上游依赖
+找 KOL 资源
+### 下游客户
+找品牌方
 ### 同业联盟
-无忧传媒(北京抖音头部MCN), 热度传媒(北京短视频MCN), 奇迹山(厦门短视频MCN)
+对标 MCN 同行
 `);
-  const city = d.parsedFields.city;
-  assert.strictEqual(city, "武汉",
-    `城市必须是 武汉, 不是 北京. 实际: ${city}`);
+  const byName = Object.fromEntries(d.cards.map(c => [c.dimension, c.type]));
+  assert.strictEqual(byName["达人营销"], "ability");
+  assert.strictEqual(byName["上游依赖"], "upstream");
+  assert.strictEqual(byName["下游客户"], "downstream");
+  assert.strictEqual(byName["同业联盟"], "peer");
 });
 
-test("extractParsedFields city: 没有地址时退回到 工商信息节", async () => {
-  const d = await runCard("成都测试有限公司", `
-# 成都测试有限公司 · 测试
+test("parseRawText: 任何公司名, rawText 里写啥就拆啥", async () => {
+  // 律所
+  const d1 = await runCard("北京金杜律师事务所", `
+## 业务描述
+### 公司诉讼
+代理知识产权侵权诉讼, 客户年案值 5000 万+。
+### 公司合规
+合同审查 200+ 客户, 平均 3-5 个工作日交付。
+`);
+  assert.strictEqual(d1.cards.length, 2);
+  assert.strictEqual(d1.cards[0].dimension, "公司诉讼");
+  // 餐饮
+  const d2 = await runCard("海底捞", `
+## 业务描述
+### 火锅堂食
+全国 1300+ 门店, 单店日均客流 800+。
+### 外卖配送
+30 分钟覆盖 5 公里, 月单量 2000 万+。
+`);
+  assert.strictEqual(d2.cards.length, 2);
+  assert.strictEqual(d2.cards[1].dimension, "外卖配送");
+});
 
-## 1. 工商信息
-公司名称: 成都测试有限公司
-办公地址: 成都市高新区天府软件园
-
-## 2. 业务描述
+// ────────────────────────────────────────────────────────────
+// extractEvidenceCandidates: 纯 n-gram 排名, 无业务词表
+// ────────────────────────────────────────────────────────────
+test("extractEvidenceCandidates: 上限 30 个, 频次优先", async () => {
+  const d = await runCard("公司X", `
+## 业务描述
 ### 达人营销
-我们做达人筛选和商务谈判, 涵盖抖音快手小红书等 KOL 投放服务。
-### 短视频内容制作
-视频拍摄剪辑全流程。月产 100+ 条短视频。
+我们做达人筛选, 达人筛选, 商务谈判。覆盖抖音, 快手, 小红书。
 `);
-  const city = d.parsedFields.city;
-  assert.strictEqual(city, "成都", `应检出 成都, 实际: ${city}`);
+  const card = getCard(d.cards, "达人营销");
+  assert.ok(card, "卡必出");
+  assert.ok(card.evidenceCandidates.length > 0, "至少 1 个候选");
+  assert.ok(card.evidenceCandidates.length <= 30, "不超过 30");
+  // 频次高的 "达人筛选" 出现 2 次, 排名靠前
+  const idx = card.evidenceCandidates.indexOf("达人筛选");
+  assert.ok(idx >= 0, "达人筛选必在候选列表里");
+  assert.ok(idx < 5, `"达人筛选" 应排在前面, 实际 idx=${idx}`);
 });
 
-test("extractParsedFields legalPerson + registeredCapital: '法人:' '注册资本:' 冒号格式", async () => {
-  const d = await runCard("测试法代公司", `
-# 测试法代公司 · 测试
+test("extractEvidenceCandidates: 律所/餐饮关键词也能提取 (通用)", async () => {
+  const d = await runCard("测试公司", `
+## 业务描述
+### 公司诉讼
+知识产权侵权诉讼代理。客户包括 字节跳动, 腾讯, 阿里。仲裁 商业合同争议 案件。
+`);
+  const card = getCard(d.cards, "公司诉讼");
+  // 候选里应该有 "诉讼", "知识产权", "客户包括字节跳动" 等
+  const c = card.evidenceCandidates.join(" ");
+  assert.ok(c.includes("诉讼"), `候选必含 "诉讼", 实际: ${c.slice(0, 200)}`);
+});
 
+// ────────────────────────────────────────────────────────────
+// rawText 占位符: <待 LLM 填写>
+// ────────────────────────────────────────────────────────────
+test("rawText 占位符: 每张卡含 (证据词: <待 LLM 填写>)", async () => {
+  const d = await runCard("公司", `
+## 业务描述
+### 达人营销
+xxx 内容
+`);
+  assert.ok(d.cards[0].text.includes("(证据词: <待 LLM 填写>)"),
+    `占位符必在 rawText 里, 实际: ${d.cards[0].text.slice(0, 200)}`);
+});
+
+// ────────────────────────────────────────────────────────────
+// LLM 任务包: 一次性给约束+候选+格式
+// ────────────────────────────────────────────────────────────
+test("evidenceAnswerPrompt: 含约束+候选+输出格式", async () => {
+  const d = await runCard("公司", `
+## 业务描述
+### 达人营销
+xxx 内容
+`);
+  const prompt = d.cards[0].evidenceAnswerPrompt;
+  assert.ok(prompt.includes("LLM 任务"), "开头必有 LLM 任务");
+  assert.ok(prompt.includes("证据词") || prompt.includes("evidence"), "必含证据词提法");
+  assert.ok(prompt.includes("evidenceCandidates") || /\d 个/.test(prompt),
+    "必含候选词引用");
+  assert.ok(prompt.includes('"evidence"'), "必含 JSON 输出格式定义");
+});
+
+test("llmInstruction (顶层): 引导 LLM 一次性完成, 不分多步", async () => {
+  const d = await runCard("公司", "## 业务描述\n### 达人营销\nxxx\n");
+  assert.ok(d.llmInstruction.includes("一次性"), "顶层 instruction 强调一次性");
+  assert.ok(!d.llmInstruction.includes("先 skill 输出"), "不应提分多步流程");
+});
+
+// ────────────────────────────────────────────────────────────
+// extractParsedFields: 公司级结构化字段
+// ────────────────────────────────────────────────────────────
+test("extractParsedFields legalPerson / registeredCapital: 标准格式", async () => {
+  const d = await runCard("测试法代", `
 ## 1. 工商信息
-公司名称: 测试法代公司
 法人: 张三
 注册资本: 1000万元
-团队规模: 50人
-
-## 2. 业务描述
+## 业务描述
 ### 达人营销
-我们做达人筛选和商务谈判, 涵盖抖音快手小红书等 KOL 投放服务。
-### 短视频内容制作
-视频拍摄剪辑全流程。月产 100+ 条短视频。
+xxx
 `);
   assert.strictEqual(d.parsedFields.legalPerson, "张三");
   assert.strictEqual(d.parsedFields.registeredCapital, "1000万元");
 });
 
-// ──────────────────────────────────────────────────────────────
-// extractDimDesc - 4 种格式
-// ──────────────────────────────────────────────────────────────
-test("extractDimDesc: ### markdown 标题格式", async () => {
-  const d = await runCard("测试MD格式", `
-# 测试MD格式 · 测试
+test("extractParsedFields city: 不被同业联盟里的 '北京' 污染", async () => {
+  const d = await runCard("武汉测试", `
+## 1. 工商信息
+地址: 武汉光谷
 
-## 2. 业务描述
-### 达人营销
-这是描述内容。我们要在这里放足够的字以确保它能被完整抓取。
+## 业务描述
+### 同业联盟
+无忧传媒(北京抖音头部MCN), 热度传媒(北京短视频MCN)
 `);
-  const card = getCard(d.cards, "ability", "达人营销");
-  assert.ok(card.text.includes("描述: 这是描述内容"), "应能从 markdown 标题抽描述");
-});
-
-test("extractDimDesc: dim: 内容 冒号格式", async () => {
-  const d = await runCard("测试冒号格式", `
-# 测试冒号格式 · 测试
-
-## 2. 业务描述
-达人营销: 冒号格式的描述文本, 长度足够。
-短视频内容制作: 短视频相关文本。
-`);
-  assert.ok(getCard(d.cards, "ability", "达人营销"), "冒号格式应能识别");
-  assert.ok(getCard(d.cards, "ability", "短视频内容制作"), "冒号格式应能识别");
-});
-
-// ──────────────────────────────────────────────────────────────
-// extractEvidenceFromDesc 边缘 case (v4.0.10+)
-// ──────────────────────────────────────────────────────────────
-test("extractEvidenceFromDesc: 人称代词 + 结尾停用字被过滤 (我们/你们/了的)", async () => {
-  const d = await runCard("测试人称", `
-# 测试人称 · 测试
-
-## 2. 业务描述
-### 达人营销
-我们做达人筛选, 商务谈判包括你们和他们, 具体的服务了。
-`);
-  const card = getCard(d.cards, "ability", "达人营销");
-  const kws = extractEvidence(card).split(/[,，]/).map(s => s.trim());
-  assert.ok(!kws.some(k => /^[我们你他她它们]+$/.test(k)),
-    `人称代词应被过滤: ${kws.join(",")}`);
-  assert.ok(!kws.some(k => /^[的了]$/.test(k)),
-    `单字停用应被过滤: ${kws.join(",")}`);
-});
-
-test("extractEvidenceFromDesc: 列表前缀 (包括/比如/例如) 被剥除", async () => {
-  const d = await runCard("测试列表前缀", `
-# 测试列表前缀 · 测试
-
-## 2. 业务描述
-### 达人营销
-美妆、穿搭、家居等行业。头部 KOL 和中腰部达人。
-`);
-  const card = getCard(d.cards, "ability", "达人营销");
-  const ev = extractEvidence(card);
-  const kws = ev.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-  // 应有 美妆/穿搭/家居 出现, 不应有 包括... 这种垃圾
-  for (const must of ["美妆", "穿搭", "家居"]) {
-    assert.ok(kws.includes(must), `必须包含 "${must}", 实际: ${kws.join(",")}`);
-  }
-  assert.ok(!kws.some(k => k.startsWith("包括")), `"包括..." 前缀应被剥: ${kws.join(",")}`);
-});
-
-test("extractEvidenceFromDesc: 不同公司 rawText 出不同 evidence (跨公司对比)", async () => {
-  const corpA = await runCard("公司A", `
-# 公司A · 测试
-
-## 2. 业务描述
-### 达人营销
-精选小红书博主合作。覆盖美妆、穿搭赛道。
-`);
-  const corpB = await runCard("公司B", `
-# 公司B · 测试
-
-## 2. 业务描述
-### 达人营销
-抖音渠道核心代理, 服务头部直播间带货项目。
-`);
-  const aEv = extractEvidence(getCard(corpA.cards, "ability", "达人营销"));
-  const bEv = extractEvidence(getCard(corpB.cards, "ability", "达人营销"));
-  // 各自有专属关键词
-  assert.ok(aEv.includes("小红书"), `A 应有小红书, 实际: ${aEv}`);
-  assert.ok(bEv.includes("抖音"), `B 应有抖音, 实际: ${bEv}`);
-  assert.notStrictEqual(aEv, bEv, "A 和 B 证据词不应相同");
+  assert.strictEqual(d.parsedFields.city, "武汉");
 });

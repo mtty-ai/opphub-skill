@@ -2,6 +2,35 @@
 
 公开版仅保留用户可感知的功能变更。内部迭代历史不入仓。
 
+## v5.0.0 (2026-07-24) ⚠️ BREAKING
+
+### 加 (New)
+- **架构重写**：skill 不再写死任何业务词 / 行业模板 / 平台字典
+  - 删除 `INDUSTRY_TEMPLATES` (mcn/saas/law/mfg 4 个行业的所有 abilities/upstream/downstream/peer 列表)
+  - 删除 `INDUSTRY_SIGNALS` (token 频率猜行业)
+  - 删除 `PLATFORM_TERMS` / `GENERIC_TERMS` / `TAIL_GENERIC` / `MID_GENERIC` (所有 stop word 词表)
+  - skill 现在认任何中文公司 rawText：律所 / 餐饮 / 制造 / 数字营销 / … 都用同一套代码
+- **LLM 任务包**：每张卡 + JSON 输出都含
+  - `evidenceCandidates` (string[30]): n-gram 频次排名 + 长度加分
+  - `evidenceAnswerPrompt` (string): 单卡 LLM 选择规则 + JSON 输出格式
+  - `llmInstruction` (string): 顶层 LLM 一次性任务流 (read → pick → rewrite → submit)
+  - 占位符 `(证据词: <待 LLM 填写>)` 在 rawText 里等 LLM 填
+- **heading 驱动拆卡**:
+  - rawText `## 业务描述` 节下 `### 维度名` 直接生成 ability 卡片
+  - `### 上游依赖 / 下游客户 / 同业联盟` 子标题自动判定 type (无需模板)
+  - 其它行业 (律所/餐饮等) 写啥拆啥: `### 公司诉讼` / `### 火锅堂食` 都能识别
+
+### 改 (Changed)
+- 数据流从 "skill 输出 → 用户确认 → LLM 再审 → submit" 多步，简化为 "skill 输出 LLM 任务包 → LLM 一次性完成 → submit"
+- 无行业推断 (token 频率猜), 行业归属由 LLM 在对话里判断并传入
+
+### 弃用 (Deprecated)
+- 任何用户写死的维度词表 (e.g. 老 v4.x 模板里硬编码的"达人营销"/"短视频内容制作")
+
+### 测 (Test)
+- 11 个单元测试: 通用性守卫 (源码不许有业务词) / heading 拆 / n-gram 候选 / 占位符 / LLM 提示
+- 用 `npm test` 跑
+
 ## v4.0.10 (2026-07-24)
 
 ### 加 (New)
