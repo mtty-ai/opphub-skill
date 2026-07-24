@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bin/opphub · v4.0.8
+# bin/opphub · v4.0.9
 # 统一入口, 把 bot 调用转发到对应 bin/*.js
 #
 #   - 通道 v4: 通道清单走 runtime, 默认通道走 server PATCH, 不经 plugin

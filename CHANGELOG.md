@@ -2,6 +2,23 @@
 
 公开版仅保留用户可感知的功能变更。内部迭代历史不入仓。
 
+## v4.0.9 (2026-07-24)
+
+### 修 (Fixed)
+- **knowledge-card 证据词提取**: 之前用模板写死的 `purpose` 字符串当证据词源, 不同公司卡片雷达词趋同 (e.g. 都显示 "KOL 投放"/"媒介代理")。现在从 rawText 自然语言描述里挖真实关键词 (拆标点 + 滤停用前缀 + 限 2-6 字名词性片段), 两家公司 evidence 完全独立。
+- **证据词格式统一**: 修复 `buildCard()` 漏传 `evidenceList` 参数 bug。所有卡片现在统一输出 `(证据词: kw1, kw2, ...)` 格式, 去掉旧 `(证据: rawText 包含 "${dim}")` 兜底文案 (前端 regex 解析不到)。
+- **雷达不再有杂质**: 前端雷达原显示 "蓝色光标"/"宝马等"等公司名/团队背景, 现在都是真实能力词 (达人筛选/店铺搭建/活动策划等)。
+- **extractParsedFields 城市检测**: 不再被同业联盟里 `无忧传媒(北京...)` 这类字符串污染。限定到「地址字段 || 工商信息节」内查找城市。
+- **knowledge-discover 骨架校验**: 加 `SKELETON_PATTERNS` 检测, rawText 含 `(名称 / 法人 / 注册资本...)` 等填空内容时直接拒绝 (skeleton_unfilled), 强制 LLM 用 web_search 搜真实数据。
+- **knowledge-discover 搜索指令内嵌**: `--name` 模式输出 `_explicitInstructions` 字段, 列出每节搜索命令 + 禁止传空骨架警告。
+
+### 加 (New)
+- 9 个单元测试覆盖 `extractEvidenceFromDesc` / `extractDimDesc` / `extractParsedFields` 三大核心逻辑。用 `npm test` 跑 (`tests/unit-knowledge-card.js`)。
+
+### 测 (Test)
+- `node --test tests/unit-knowledge-card.js` 全部 9 测试通过 (~450ms)
+- `npm test` 端到端验证脚本 (`tests/e2e-verify.js`) 不动
+
 ## v4.0.0 (2026-07-22)
 
 ### 加 (New)
