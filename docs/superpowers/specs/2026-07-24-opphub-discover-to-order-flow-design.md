@@ -230,6 +230,23 @@ type MatchPushPayload = {
 
 ---
 
+**批 1 实施 (2026-07-24, commit 链):**
+
+| commit | repo | 改动 |
+|---|---|---|
+| `28e2e35` | opphub-web submodule | `lib/push.ts` 新建 + 4 个单元测试 (`pushViaWs()` + service JWT 鉴权) |
+| `5920169` | opphub-web submodule | `app/api/matchings/route.ts` 改造, 双方推送 (pushToOther + pushToSelf) + 失败退路写 pending_message |
+| `9758ec1` | opphub-web submodule | fallback `type: 'matching_chat'` → `'credit'` (schema 合法值), 首次创建 fallback 用 `pushArgs` schema |
+| `2f32843` | opphub-web submodule | `pushViaWs()` service JWT 加 `opcId: 'service:push'` (ws-server.js:810 强制要求) |
+| `1bf6842` | opphub-ws 独立 repo | `ws-server.js` 加 `SYSTEM_TRIGGERS` 白名单 (10 个 event), `__tests__/system-triggers-whitelist.test.js` (4/4 通过) |
+| `f3b7427` `5b51988` `7daf717` | main repo | submodule bump commits |
+
+**端到端验证 (Task 4)**: 起 ws-server (WS_PORT=13003, MOCK_DB=1), 模拟 pushViaWs 完整调用 → admin caller match.created ✅, biz caller (非 admin) match.created 通过白名单 ✅, biz caller dm 仍 403 ✅, biz caller 乱写 event 仍 403 ✅.
+
+**遗留 (留作后续批次)**:
+- 双方推送当前是 best-effort 给自己 (失败只 warn 不退路), 严格应退路写 pending_message — 留作批 2 顺手补
+- fallback payload schema 第一处统一用 pushArgs, 第二处 (retry) 仍用原 schema (title/desc/text) — 后续批 3 可统一
+
 ## 4. 批 2: 评分公式升级 + 频控 + 匿名
 
 ### 4.1 新评分公式
@@ -956,3 +973,4 @@ Tabs: [进行中] [已完成] [争议中] [已取消]
 - ⚠️ Payment 表留作开放 (scope 限制)
 - ⚠️ trust_score / price_match 留作开放 (依赖其他 spec)
 - ⚠️ `/matches/[id]` 路由新建, 现有 `/matches` 内嵌 ChatThread 过渡处理 (本期后期废弃)
+- ✅ **批 1 已实装 (2026-07-24)**: 见 §3 末尾 commit 表 + Task 4 端到端验证记录. 推送管道从直接 `pendingMessage.create` 改为走 `opphub-ws POST /push` (system trigger 白名单 + service JWT 双保险)
