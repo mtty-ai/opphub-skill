@@ -155,11 +155,16 @@ function extractParsedFields(name, rawText, industry) {
   const addressMatch = rawText.match(/地址[:：]\s*([^\n]+)/);
   if (addressMatch) pairs.push(["address", addressMatch[1].trim().slice(0, 100)]);
 
-  // 城市 (从 rawText 里识别)
+  // 城市 (只从地址字段或工商信息节识别, 避免同业联盟里的地名干扰)
+  let city = "";
+  const addressField = pairs.find(p => p[0] === "address")?.[1] || "";
+  const bizSection = rawText.match(/##\s*1\.\s*工商信息\s*\n+([\s\S]*?)(?=\n##\s|\s*$)/);
+  const searchText = addressField || (bizSection ? bizSection[1] : "");
   const cities = ["上海", "北京", "深圳", "广州", "杭州", "成都", "南京", "武汉", "苏州", "天津", "重庆"];
   for (const c of cities) {
-    if (rawText.includes(c)) { pairs.push(["city", c]); break; }
+    if (searchText.includes(c)) { city = c; break; }
   }
+  if (city) pairs.push(["city", city]);
 
   // 业务描述 (取 ## 2. 业务描述 段)
   const bizMatch = rawText.match(/##\s*2\.\s*业务描述\s*\n+([\s\S]*?)(?=\n##\s|\s*$)/);
@@ -256,46 +261,81 @@ function generateCards(name, industryCode, rawText) {
 
   // 通用模板词 (粗粒度, 准不准 bot 看完让人工拍)
   const GENERIC_TERMS = new Set([
-    "达人营销", "短视频", "内容制作", "平台代运营", "电商转化",
-    "虚拟人", "IP", "营销", "广告投放", "SaaS", "撮合", "平台", "API",
+    "营销", "广告投放", "SaaS", "撮合", "平台", "API", "数字", "运营", "服务",
   ]);
 
   function hasEvidence(dimension, purpose) {
-    // 1. 模板 dimension 词直接在 rawText 出现 → 命中
-    if (dimension && lowerText.includes(dimension)) return { ok: true, source: "dimension_match" };
-    // 2. 模板 purpose 任一关键词在 rawText 出现 → 命中 (正则可被词破坏, 改简单子串)
+    // 1. 先查模板 purpose 具体关键词 → 命中给丰富证据词
     if (purpose) {
       const wordHits = [];
-      const stop = new Set(["·", "/", " ", "  "]);
-      const tokens = purpose.split(/[/、,; \n]/).filter(Boolean);
+      const tokens = purpose.split(/[/、,; \n]+/).filter(t => t.trim().length >= 2);
       for (const t of tokens) {
-        if (stop.has(t) || t.length < 2) continue;
-        if (GENERIC_TERMS.has(t)) continue; // 通用词不算证据
-        if (lowerText.includes(t)) wordHits.push(t);
+        const trimmed = t.trim();
+        if (GENERIC_TERMS.has(trimmed)) continue;
+        if (lowerText.includes(trimmed)) wordHits.push(trimmed);
       }
       if (wordHits.length >= 1) {
-        return { ok: true, source: "purpose_keyword_match", evidence: wordHits };
+        return { ok: true, source: "purpose_keyword_match", evidence: [...new Set(wordHits)] };
       }
     }
+    // 2. 兜底: dimension 词出现也能匹配, 但证据词质量低
+    if (dimension && lowerText.includes(dimension)) return { ok: true, source: "dimension_match" };
     return { ok: false };
   }
 
-  function buildCard(type, dim, emoji, candidate, evidenceSource) {
-    const evidenceNote = evidenceSource === "purpose_keyword_match"
-      ? `\n\n(证据词: ${candidate.evidence?.join(", ") || dim})`
-      : `\n\n(证据: rawText 包含 "${dim}")`;
+  function escapeRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function extractDimDesc(rawText, dim) {
+    const paren = rawText.match(new RegExp(`${escapeRegex(dim)}\\s*\\(([^)]+)\\)`));
+    if (paren) return paren[1].trim();
+    const colon = rawText.match(new RegExp(`${escapeRegex(dim)}\\s*[:：]\\s*(.+)`));
+    if (colon) return colon[1].trim().slice(0, 200);
+    const heading = rawText.match(new RegExp(`###+\\s*${escapeRegex(dim)}\\s*\\n([\\s\\S]*?)(?=\\n###|\\n##|\\n#\\s|$)`));
+    if (heading) return heading[1].trim().slice(0, 300);
+    const line = rawText.split("\n").find(l => l.includes(dim) && !l.startsWith("#") && !l.startsWith("(") && !l.startsWith(")"));
+    if (line) return line.trim().replace(/^[^:：]*[:：]?\s*/, "").slice(0, 200);
+    return null;
+  }
+
+  // 从自然语言描述里挖关键词当证据词
+  function extractEvidenceFromDesc(cardDesc, dim) {
+    if (!cardDesc) return dim;
+    const hits = [];
+    const seen = new Set();
+    // 拆标点 + 停用字, 取 2-6 字的名词性碎片
+    const fragments = cardDesc.split(/[,，、。；：:等和与的]+/);
+    for (const f of fragments) {
+      let t = f.trim().replace(/^[是从到为全由覆盖涵盖含以及在之对其按]+/, "");
+      if (t.length < 2 || t.length > 6) continue;
+      if (/^[\d%]/.test(t) || /^[a-zA-Z]{3,}$/.test(t) || /^[的了吗]$/.test(t)) continue;
+      if (t === dim || GENERIC_TERMS.has(t)) continue;
+      if (seen.has(t)) continue;
+      seen.add(t);
+      hits.push(t);
+    }
+    return hits.length > 0 ? hits.slice(0, 8).join(", ") : dim;
+  }
+
+  function buildCard(type, dim, emoji) {
     const label = {
       ability: "能力卡片",
       upstream: "上游依赖",
       downstream: "下游服务",
     }[type] || type;
-    return {
-      type,
-      dimension: dim,
-      emoji,
-      evidenceSource,
-      text: `<!-- opphub-raw-text-v1 -->\n${name} · ${label} · ${dim}${evidenceNote}\n\n(来自 rawText 实查, 非模板填空)`,
-    };
+
+    const cardDesc = extractDimDesc(rawText, dim);
+    const evidenceWords = extractEvidenceFromDesc(cardDesc, dim);
+    const evidenceNote = cardDesc ? `\n\n(证据词: ${evidenceWords})` : "";
+    const descLines = [];
+    if (cardDesc) descLines.push(`描述: ${cardDesc}`);
+
+    const text = descLines.length > 0
+      ? `<!-- opphub-raw-text-v1 -->\n${name} · ${label} · ${dim}\n\n${descLines.join("\n")}${evidenceNote}`
+      : `<!-- opphub-raw-text-v1 -->\n${name} · ${label} · ${dim}${evidenceNote}\n\n(来自 rawText 实查, 非模板填空)`;
+
+    return { type, dimension: dim, emoji, text };
   }
 
   function recordUnmatch(type, dim, purpose) {
@@ -307,11 +347,10 @@ function generateCards(name, industryCode, rawText) {
     });
   }
 
-  // 能力卡片 (只拆有证据的)
+  // 能力卡片 (自然语言描述中有维度名就出卡, 证据词从描述中挖)
   for (const ab of template.abilities) {
-    const hit = hasEvidence(ab.dimension, ab.purpose);
-    if (hit.ok) {
-      cards.push(buildCard("ability", ab.dimension, "✅", ab, hit.source));
+    if (lowerText.includes(ab.dimension)) {
+      cards.push(buildCard("ability", ab.dimension, "✅"));
     } else {
       recordUnmatch("ability", ab.dimension, ab.purpose);
     }
@@ -319,9 +358,8 @@ function generateCards(name, industryCode, rawText) {
 
   // 上游依赖
   for (const up of template.upstream) {
-    const hit = hasEvidence(up.category, up.desc);
-    if (hit.ok) {
-      cards.push(buildCard("upstream", up.category, "⬆️", up, hit.source));
+    if (lowerText.includes(up.category)) {
+      cards.push(buildCard("upstream", up.category, "⬆️"));
     } else {
       recordUnmatch("upstream", up.category, up.desc);
     }
@@ -329,20 +367,18 @@ function generateCards(name, industryCode, rawText) {
 
   // 下游服务
   for (const dn of template.downstream) {
-    const hit = hasEvidence(dn.category, dn.desc);
-    if (hit.ok) {
-      cards.push(buildCard("downstream", dn.category, "⬇️", dn, hit.source));
+    if (lowerText.includes(dn.category)) {
+      cards.push(buildCard("downstream", dn.category, "⬇️"));
     } else {
       recordUnmatch("downstream", dn.category, dn.desc);
     }
   }
 
-  // 同行关系 (peer) — v3.4 spec 4 种 entryType 全部覆盖
+  // 同行关系 (peer)
   if (Array.isArray(template.peer)) {
     for (const p of template.peer) {
-      const hit = hasEvidence(p.category, p.desc);
-      if (hit.ok) {
-        cards.push(buildCard("peer", p.category, "🔗", p, hit.source));
+      if (lowerText.includes(p.category)) {
+        cards.push(buildCard("peer", p.category, "🔗"));
       } else {
         recordUnmatch("peer", p.category, p.desc);
       }

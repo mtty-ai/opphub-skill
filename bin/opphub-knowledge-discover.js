@@ -175,9 +175,10 @@ async function main() {
     return;
   }
 
-  // --name 模式: 返骨架 + 查询计划 (skill turn 据此调 LLM 工具)
+  // --name 模式: 返骨架 + 查询计划 + 强制搜索指令
   const queryPlan = buildQueryPlan(args.name);
   const rawTextSkeleton = buildRawTextSkeleton(args.name);
+  const searchTasks = queryPlan.map((q, i) => `第${i + 1}步: 用 ${q.category === "web" ? "web_search" : q.category === "memory" ? "memory_search" : "wiki_search"} 搜 "${q.query}" → 填入 rawText 的 ## ${i + 1}. ${q.name} 节`);
   const result = {
     ok: true,
     mode: "query-plan",
@@ -187,6 +188,15 @@ async function main() {
     sources: queryPlan.map((q) => ({ ...q, status: "pending_skill_turn" })),
     durationMs: Date.now() - t0,
     nextStep: "skill turn 调 LLM/web 工具填骨架, 然后 --raw-text <filledRawText> 重跑",
+    _explicitInstructions: [
+      "‼️ 你必须执行以下搜索, 不能省略或跳过:",
+      ...searchTasks,
+      `第${queryPlan.length + 1}步: 把所有搜索结果拼成 rawText (每节搜到真实内容, 含业务描述/价格/案例)`,
+      `第${queryPlan.length + 2}步: 调 opphub knowledge-discover --name "${args.name}" --raw-text "<rawText>" --json 验证`,
+      "‼️ 禁止: 传空骨架或占位符通过! 校验会检测骨架填空内容并拒绝。必须搜到实际数据。",
+      "‼️ 业务描述节: 必须包含具体能力介绍+价格(如 KOL投放单次5-50万, 月费2-5万等)",
+      "‼️ 项目案例节: 列具体客户行业",
+    ].join("\n"),
   };
   if (wantJson) {
     console.log(JSON.stringify(result, null, 2));
@@ -196,15 +206,36 @@ async function main() {
     for (const q of queryPlan) {
       console.log(`  [${q.category}] ${q.name}: ${q.query}`);
     }
-    console.log(`\n下一步: skill turn 调 LLM/web 工具填骨架, 再用 --raw-text <filledRawText> 重跑`);
+    console.log(`\n‼️ 你必须用 web_search 搜索每一节, 填入真实数据后重跑`);
+    console.log(`  禁止: 传空骨架, 校验会拒绝`);
   }
 }
+
+const SKELETON_PATTERNS = [
+  "名称 / 法人", "注册资本 / 行业", "业务描述 / 公司大事记",
+  "岗位关键词推断业务", "已服务客户 / 案例",
+  "历史对话是否提过该公司", "历史 wiki 是否有相关条目",
+];
 
 // raw-text 模式增加: 公司名验证 + rawText 完整性检查 + 拼写纠错候选
 function validateRawText(name, rawText, webResults) {
   const issues = [];
   const warnings = [];
   let ok = true;
+
+  // 0. 骨架检测: rawText 包含 skeleton placeholder 填空内容 → 拒绝
+  for (const p of SKELETON_PATTERNS) {
+    if (rawText.includes(p)) {
+      issues.push({
+        type: "skeleton_unfilled",
+        severity: "error",
+        message: `rawText 含骨架填空内容 "${p}"。禁止传空骨架通过。你必须用 web_search 搜真实数据填充每一节, 再重试。6 个搜索: 工商信息(法人/注册资本/行业/地址)、业务描述(主营/产品/服务/价格)、招聘岗位(岗位关键词/团队规模)、项目案例(客户/案例)、memory、wiki`,
+      });
+      ok = false;
+      break;
+    }
+  }
+  if (!ok) return { ok, issues, warnings, suggestions: [] };
 
   // 1. 公司名验证: rawText 里必须出现公司名核心 (>=4 字) 或其简体
   const nameCore = name.replace(/^(上海|北京|广州|深圳|杭州|成都|南京|武汉|苏州|天津|重庆)/, "").replace(/(有限公司|股份有限公司|集团|公司)$/, "").trim();
