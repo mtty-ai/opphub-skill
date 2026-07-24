@@ -58,6 +58,34 @@ test("通用性: 源码不许写业务词表 (平台/服务/MCN)", () => {
 // ────────────────────────────────────────────────────────────
 // parseRawText: ### heading 拆解
 // ────────────────────────────────────────────────────────────
+test("parseRawText: 多 ## 节 + 部分节没 ### 子标题也不能吞后面节", async () => {
+  // bug 守卫: 之前 "## 1. 工商信息" 没 ###, 内层 j 循环跑到文件尾,
+  // 吞掉后面所有 ## 节, 修后必须能正确切到下一节
+  const d = await runCard("公司X", `
+## 1. 工商信息
+法人: 张三
+注册资本: 1000万
+## 2. 业务描述
+### 能力A
+做 A 的事
+### 能力B
+做 B 的事
+## 3. 上游依赖
+### 资源X
+找资源 X
+## 4. 下游客户
+### 客户Y
+找客户 Y
+`);
+  const byName = Object.fromEntries(d.cards.map(c => [c.dimension, c.type]));
+  // 4 张卡必须全有
+  assert.strictEqual(d.cards.length, 4, "4 个 ### 必须全出");
+  assert.strictEqual(byName["能力A"], "ability");
+  assert.strictEqual(byName["能力B"], "ability");
+  assert.strictEqual(byName["资源X"], "upstream", `资源X 必是 upstream, 实际 ${byName["资源X"]}`);
+  assert.strictEqual(byName["客户Y"], "downstream", `客户Y 必是 downstream, 实际 ${byName["客户Y"]}`);
+});
+
 test("parseRawText: ## 2. 业务描述 节下 ### 子标题全部出 ability 卡", async () => {
   const d = await runCard("上海睿驰", `
 ## 2. 业务描述

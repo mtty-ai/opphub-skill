@@ -83,7 +83,7 @@ function parseRawText(rawText) {
     const sectionTitle = h2[1].trim();
     const sectionType = inferTypeFromTitle(sectionTitle);
 
-    // 在这个 ## 块里找所有 ### 子标题
+    // 在这个 ## 块里找所有 ### 子标题 (遇到下一个 ## 就停, 别吞后面节)
     let j = i + 1;
     while (j < lines.length) {
       const h3 = lines[j].match(/^###\s+(.+?)\s*$/);
@@ -104,6 +104,9 @@ function parseRawText(rawText) {
         const finalType = dimType !== "ability" ? dimType : sectionType;
         sections.push({ sectionTitle, type: finalType, dimension, description });
         j = k;
+      } else if (lines[j].match(/^##\s/)) {
+        // 遇到下一个 ## 段头, 跳出当前 ## 块的扫描
+        break;
       } else {
         j++;
       }
