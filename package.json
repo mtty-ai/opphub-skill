@@ -23,8 +23,9 @@
   ],
   "scripts": {
     "check-version": "node scripts/check-version.js",
-    "test": "node --test tests/",
-    "lint": "node scripts/lint.js"
+    "test": "node --test tests/unit-*.js",
+    "test:e2e": "node tests/e2e-verify.js",
+    "lint": "node scripts/check-version.js"
   },
   "dependencies": {},
   "peerDependencies": {
