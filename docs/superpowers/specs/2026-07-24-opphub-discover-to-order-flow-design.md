@@ -555,6 +555,13 @@ redirects: [
 | `opphub-web/next.config.js` | 加 redirects |
 | `opphub-web/app/match/page.tsx` | 删除或 stub |
 
+**批 4 实施 (2026-07-24)**:
+- `opphub-ws/prisma/schema.prisma` PushLog 模型 (push_log 表)
+- `opphub-ws/ws-server.js` 3 点写入 (delivered/failed/dead_letter)
+- `opphub-web/next.config.js` redirects (已存在, 验证通过)
+- `opphub-web/app/match/page.tsx` redirect stub (useRouter().replace('/matches'))
+- `opphub-ws/__tests__/push-log.test.js` 集成测试
+
 ---
 
 ## 7. 数据流总图
