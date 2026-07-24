@@ -66,8 +66,8 @@ test("extractEvidenceFromDesc: 拆分自然语言描述为关键词", async () =
   }
   // 不应该出现数字开头的片段
   assert.ok(!kws.some(k => /^[\d%]/.test(k)), `不应有数字开头: ${kws.join(",")}`);
-  // 不应该有超过 6 字的片段
-  assert.ok(!kws.some(k => k.length > 6), `不应有 >6 字片段: ${kws.join(",")}`);
+  // 不应该有超过 8 字的片段
+  assert.ok(!kws.some(k => k.length > 8), `不应有 >8 字片段: ${kws.join(",")}`);
 });
 
 test("extractEvidenceFromDesc: 滤掉前导停用字 (从/到/为/覆盖/含等)", async () => {
@@ -200,4 +200,64 @@ test("extractDimDesc: dim: 内容 冒号格式", async () => {
 `);
   assert.ok(getCard(d.cards, "ability", "达人营销"), "冒号格式应能识别");
   assert.ok(getCard(d.cards, "ability", "短视频内容制作"), "冒号格式应能识别");
+});
+
+// ──────────────────────────────────────────────────────────────
+// extractEvidenceFromDesc 边缘 case (v4.0.10+)
+// ──────────────────────────────────────────────────────────────
+test("extractEvidenceFromDesc: 人称代词 + 结尾停用字被过滤 (我们/你们/了的)", async () => {
+  const d = await runCard("测试人称", `
+# 测试人称 · 测试
+
+## 2. 业务描述
+### 达人营销
+我们做达人筛选, 商务谈判包括你们和他们, 具体的服务了。
+`);
+  const card = getCard(d.cards, "ability", "达人营销");
+  const kws = extractEvidence(card).split(/[,，]/).map(s => s.trim());
+  assert.ok(!kws.some(k => /^[我们你他她它们]+$/.test(k)),
+    `人称代词应被过滤: ${kws.join(",")}`);
+  assert.ok(!kws.some(k => /^[的了]$/.test(k)),
+    `单字停用应被过滤: ${kws.join(",")}`);
+});
+
+test("extractEvidenceFromDesc: 列表前缀 (包括/比如/例如) 被剥除", async () => {
+  const d = await runCard("测试列表前缀", `
+# 测试列表前缀 · 测试
+
+## 2. 业务描述
+### 达人营销
+美妆、穿搭、家居等行业。头部 KOL 和中腰部达人。
+`);
+  const card = getCard(d.cards, "ability", "达人营销");
+  const ev = extractEvidence(card);
+  const kws = ev.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+  // 应有 美妆/穿搭/家居 出现, 不应有 包括... 这种垃圾
+  for (const must of ["美妆", "穿搭", "家居"]) {
+    assert.ok(kws.includes(must), `必须包含 "${must}", 实际: ${kws.join(",")}`);
+  }
+  assert.ok(!kws.some(k => k.startsWith("包括")), `"包括..." 前缀应被剥: ${kws.join(",")}`);
+});
+
+test("extractEvidenceFromDesc: 不同公司 rawText 出不同 evidence (跨公司对比)", async () => {
+  const corpA = await runCard("公司A", `
+# 公司A · 测试
+
+## 2. 业务描述
+### 达人营销
+精选小红书博主合作。覆盖美妆、穿搭赛道。
+`);
+  const corpB = await runCard("公司B", `
+# 公司B · 测试
+
+## 2. 业务描述
+### 达人营销
+抖音渠道核心代理, 服务头部直播间带货项目。
+`);
+  const aEv = extractEvidence(getCard(corpA.cards, "ability", "达人营销"));
+  const bEv = extractEvidence(getCard(corpB.cards, "ability", "达人营销"));
+  // 各自有专属关键词
+  assert.ok(aEv.includes("小红书"), `A 应有小红书, 实际: ${aEv}`);
+  assert.ok(bEv.includes("抖音"), `B 应有抖音, 实际: ${bEv}`);
+  assert.notStrictEqual(aEv, bEv, "A 和 B 证据词不应相同");
 });

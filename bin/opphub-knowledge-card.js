@@ -300,22 +300,47 @@ function generateCards(name, industryCode, rawText) {
   }
 
   // 从自然语言描述里挖关键词当证据词
+  const PLATFORM_TERMS = [
+    "抖音", "快手", "小红书", "B站", "视频号", "微博", "微信公众号", "TikTok",
+    "YouTube", "Facebook", "Instagram", "Twitter", "LinkedIn", "豆瓣", "知乎",
+  ];
+
   function extractEvidenceFromDesc(cardDesc, dim) {
     if (!cardDesc) return dim;
     const hits = [];
     const seen = new Set();
-    // 拆标点 + 停用字, 取 2-6 字的名词性碎片
-    const fragments = cardDesc.split(/[,，、。；：:等和与的]+/);
-    for (const f of fragments) {
-      let t = f.trim().replace(/^[是从到为全由覆盖涵盖含以及在之对其按]+/, "");
-      if (t.length < 2 || t.length > 6) continue;
-      if (/^[\d%]/.test(t) || /^[a-zA-Z]{3,}$/.test(t) || /^[的了吗]$/.test(t)) continue;
-      if (t === dim || GENERIC_TERMS.has(t)) continue;
-      if (seen.has(t)) continue;
-      seen.add(t);
-      hits.push(t);
+    const add = (term) => {
+      if (!term || term.length < 2 || term.length > 8) return;
+      if (/^[\d%]/.test(term)) return;
+      if (term === dim || GENERIC_TERMS.has(term)) return;
+      if (seen.has(term)) return;
+      seen.add(term);
+      hits.push(term);
+    };
+
+    // 1) 平台名等高优先关键词 (单跑一过, 强相关)
+    for (const p of PLATFORM_TERMS) {
+      if (cardDesc.includes(p)) add(p);
     }
-    return hits.length > 0 ? hits.slice(0, 8).join(", ") : dim;
+
+    // 2) 标点拆分 (不用 \s 是因为 "合作" 等词内部不该断)
+    const fragments = cardDesc.split(/[,，、。；：:]+/);
+    for (const f of fragments) {
+      let t = f.trim()
+        .replace(/[，。、；：:]+$/, "")
+        .replace(/(等主流平台|等核心资源|等服务|等服务$|等业务|等业务$|等等|行业|领域|方面|场景|赛道|玩法|业务|服务|平台|资源)$/, "")
+        .replace(/(等等|行业|领域|方面|场景|赛道|玩法|业务|等)$/, "")
+        .replace(/^(包括|比如|例如|以及|排除|除外|同时|其他|等)/, "")
+        .replace(/^[是从到为全由覆盖涵盖含以及在之对其按]+/, "")
+        .replace(/^(我们|你|他|她|它)+/, "");  // 剥人称前缀
+      if (t.length < 2 || t.length > 8) continue;
+      if (/^[\d%]/.test(t) || /^[a-zA-Z]{3,}$/.test(t)) continue;
+      // 过滤纯人称单字/助词 (的, 了, 吗, 我们, 你们...)
+      if (/^(我们|你们|他们|她们|它们|的了呢吧嘛)$/.test(t)) continue;
+      if (t === dim || GENERIC_TERMS.has(t)) continue;
+      add(t);
+    }
+    return hits.length > 0 ? hits.slice(0, 10).join(", ") : dim;
   }
 
   function buildCard(type, dim, emoji) {
